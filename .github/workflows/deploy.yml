@@ -1,0 +1,121 @@
+name: Deploy
+
+on:
+  push:
+    branches: [production]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    name: checks
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    name: deploy
+    needs: checks
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ vars.PRODUCTION_BASE_URL }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Resolve image name
+        id: image
+        run: |
+          name="ghcr.io/${GITHUB_REPOSITORY,,}"
+          sha_tag="sha-${GITHUB_SHA::7}"
+          {
+            echo "name=${name}"
+            echo "sha_tag=${sha_tag}"
+            echo "ref=${name}:${sha_tag}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: |
+            type=raw,value=${{ steps.image.outputs.sha_tag }}
+            type=raw,value=production
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          target: prod
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trigger Render deploy
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
+            echo "::notice::RENDER_DEPLOY_HOOK_URL is not set; skipping Render deploy."
+            exit 0
+          fi
+          encoded_image="$(jq -rn --arg value "$IMAGE_REF" '$value|@uri')"
+          case "$RENDER_DEPLOY_HOOK_URL" in
+            *\?*) separator="&" ;;
+            *) separator="?" ;;
+          esac
+          status="$(curl -sS -o /dev/null -w '%{http_code}' -X POST "${RENDER_DEPLOY_HOOK_URL}${separator}imgURL=${encoded_image}")"
+          if [ "${status:0:1}" != "2" ]; then
+            echo "::error::Render deploy hook returned HTTP ${status}."
+            exit 1
+          fi
+          echo "Render deploy triggered for ${IMAGE_REF} (HTTP ${status})."
+
+      - name: Smoke test health endpoint
+        env:
+          PRODUCTION_BASE_URL: ${{ vars.PRODUCTION_BASE_URL }}
+        run: |
+          if [ -z "$PRODUCTION_BASE_URL" ]; then
+            echo "::notice::PRODUCTION_BASE_URL is not set; skipping smoke test."
+            exit 0
+          fi
+          url="${PRODUCTION_BASE_URL%/}/health"
+          deadline=$((SECONDS + 300))
+          attempt=1
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "$url" || true)"
+            echo "Attempt ${attempt}: ${url} returned HTTP ${status}"
+            if [ "$status" = "200" ]; then
+              exit 0
+            fi
+            attempt=$((attempt + 1))
+            sleep 10
+          done
+          echo "::error::${url} did not return HTTP 200 within 5 minutes."
+          exit 1
