@@ -9,6 +9,8 @@ import (
 	"time"
 
 	_ "github.com/joho/godotenv/autoload"
+
+	"mini-ecommerce/internal/auth"
 )
 
 const (
@@ -16,19 +18,20 @@ const (
 	defaultJWTTTL      = "24h"
 )
 
-type SeedAdmin struct {
+type SeedUser struct {
 	Name     string
 	Email    string
 	Password string
 }
 
 type Config struct {
-	Port        int
-	DatabaseURL string
-	JWTSecret   string
-	JWTTTL      time.Duration
-	SeedOnStart bool
-	SeedAdmin   SeedAdmin
+	Port         int
+	DatabaseURL  string
+	JWTSecret    string
+	JWTTTL       time.Duration
+	SeedOnStart  bool
+	SeedAdmin    SeedUser
+	SeedCustomer SeedUser
 }
 
 func Load() (Config, error) {
@@ -63,13 +66,14 @@ func Load() (Config, error) {
 	}
 	cfg.SeedOnStart = seedOnStart
 
-	cfg.SeedAdmin = SeedAdmin{
-		Name:     strings.TrimSpace(os.Getenv("SEED_ADMIN_NAME")),
-		Email:    strings.TrimSpace(os.Getenv("SEED_ADMIN_EMAIL")),
-		Password: os.Getenv("SEED_ADMIN_PASSWORD"),
-	}
+	cfg.SeedAdmin = loadSeedUser("SEED_ADMIN")
+	cfg.SeedCustomer = loadSeedUser("SEED_CUSTOMER")
 	if cfg.SeedOnStart {
-		problems = append(problems, cfg.SeedAdmin.validate()...)
+		problems = append(problems, cfg.SeedAdmin.validate("SEED_ADMIN")...)
+		problems = append(problems, cfg.SeedCustomer.validate("SEED_CUSTOMER")...)
+		if cfg.SeedAdmin.Email != "" && auth.NormalizeEmail(cfg.SeedAdmin.Email) == auth.NormalizeEmail(cfg.SeedCustomer.Email) {
+			problems = append(problems, errors.New("SEED_ADMIN_EMAIL and SEED_CUSTOMER_EMAIL must be different"))
+		}
 	}
 
 	if len(problems) > 0 {
@@ -78,16 +82,24 @@ func Load() (Config, error) {
 	return cfg, nil
 }
 
-func (a SeedAdmin) validate() []error {
+func loadSeedUser(prefix string) SeedUser {
+	return SeedUser{
+		Name:     strings.TrimSpace(os.Getenv(prefix + "_NAME")),
+		Email:    strings.TrimSpace(os.Getenv(prefix + "_EMAIL")),
+		Password: os.Getenv(prefix + "_PASSWORD"),
+	}
+}
+
+func (u SeedUser) validate(prefix string) []error {
 	var problems []error
-	if a.Name == "" || len(a.Name) > 100 {
-		problems = append(problems, errors.New("SEED_ADMIN_NAME must be 1-100 characters"))
+	if u.Name == "" || len(u.Name) > 100 {
+		problems = append(problems, fmt.Errorf("%s_NAME must be 1-100 characters", prefix))
 	}
-	if !strings.Contains(a.Email, "@") || len(a.Email) > 255 {
-		problems = append(problems, errors.New("SEED_ADMIN_EMAIL must be a valid email"))
+	if !strings.Contains(u.Email, "@") || len(u.Email) > 255 {
+		problems = append(problems, fmt.Errorf("%s_EMAIL must be a valid email", prefix))
 	}
-	if len(a.Password) < 8 || len(a.Password) > 72 {
-		problems = append(problems, errors.New("SEED_ADMIN_PASSWORD must be 8-72 characters"))
+	if len(u.Password) < 8 || len(u.Password) > 72 {
+		problems = append(problems, fmt.Errorf("%s_PASSWORD must be 8-72 characters", prefix))
 	}
 	return problems
 }

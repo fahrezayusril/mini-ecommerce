@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
+	"mini-ecommerce/internal/auth"
 	"mini-ecommerce/internal/domain"
 )
 
@@ -67,14 +68,10 @@ func newAuthService(users UserRepository, tokens TokenIssuer, hashCost int) (*Au
 	}, nil
 }
 
-func NormalizeEmail(email string) string {
-	return strings.ToLower(strings.TrimSpace(email))
-}
-
 func (s *AuthService) Register(ctx context.Context, input RegisterInput) (AuthResult, error) {
-	passwordHash, err := bcrypt.GenerateFromPassword([]byte(input.Password), s.hashCost)
+	passwordHash, err := auth.HashPassword(input.Password, s.hashCost)
 	if err != nil {
-		return AuthResult{}, fmt.Errorf("hash password: %w", err)
+		return AuthResult{}, err
 	}
 
 	id, err := uuid.NewV7()
@@ -85,8 +82,8 @@ func (s *AuthService) Register(ctx context.Context, input RegisterInput) (AuthRe
 	user, err := s.users.Create(ctx, domain.User{
 		ID:           id,
 		Name:         strings.TrimSpace(input.Name),
-		Email:        NormalizeEmail(input.Email),
-		PasswordHash: string(passwordHash),
+		Email:        auth.NormalizeEmail(input.Email),
+		PasswordHash: passwordHash,
 		Role:         domain.RoleCustomer,
 	})
 	if err != nil {
@@ -96,7 +93,7 @@ func (s *AuthService) Register(ctx context.Context, input RegisterInput) (AuthRe
 }
 
 func (s *AuthService) Login(ctx context.Context, input LoginInput) (AuthResult, error) {
-	user, err := s.users.FindByEmail(ctx, NormalizeEmail(input.Email))
+	user, err := s.users.FindByEmail(ctx, auth.NormalizeEmail(input.Email))
 	if errors.Is(err, domain.ErrNotFound) {
 		_ = s.compareHash(s.dummyHash, []byte(input.Password))
 		return AuthResult{}, domain.ErrInvalidCredentials

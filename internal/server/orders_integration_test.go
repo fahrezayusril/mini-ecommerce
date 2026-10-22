@@ -41,7 +41,10 @@ func setupOrderAPI(t *testing.T) *orderAPI {
 	t.Cleanup(pool.Close)
 	require.NoError(t, database.MigrateDown(pool))
 	require.NoError(t, database.MigrateUp(pool))
-	_, err = database.Seed(ctx, pool, config.SeedAdmin{Name: "Admin", Email: "admin@example.com", Password: "supersecret123"})
+	_, err = database.Seed(ctx, pool,
+		config.SeedUser{Name: "Admin", Email: "admin@example.com", Password: "supersecret123"},
+		config.SeedUser{Name: "Customer", Email: "customer@example.com", Password: "supersecret456"},
+	)
 	require.NoError(t, err)
 
 	httpServer, err := NewServer(config.Config{Port: 8080, JWTSecret: strings.Repeat("e", 32), JWTTTL: time.Hour}, database.New(pool))

@@ -94,12 +94,12 @@ func bootstrapDatabase(cfg config.Config) (database.Service, error) {
 	log.Println("database migrations applied")
 
 	if cfg.SeedOnStart {
-		result, err := database.Seed(ctx, pool, cfg.SeedAdmin)
+		result, err := database.Seed(ctx, pool, cfg.SeedAdmin, cfg.SeedCustomer)
 		if err != nil {
 			pool.Close()
 			return nil, fmt.Errorf("seed database: %w", err)
 		}
-		log.Printf("database seeded: admin_created=%t products_created=%d", result.AdminCreated, result.ProductsCreated)
+		log.Printf("database seeded: admin_created=%t customer_created=%t products_created=%d", result.AdminCreated, result.CustomerCreated, result.ProductsCreated)
 	}
 
 	return database.New(pool), nil

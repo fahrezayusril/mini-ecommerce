@@ -47,7 +47,10 @@ func setupProductAPI(t *testing.T) *productAPI {
 	t.Cleanup(pool.Close)
 	require.NoError(t, database.MigrateDown(pool))
 	require.NoError(t, database.MigrateUp(pool))
-	_, err = database.Seed(ctx, pool, config.SeedAdmin{Name: "Admin", Email: "admin@example.com", Password: "supersecret123"})
+	_, err = database.Seed(ctx, pool,
+		config.SeedUser{Name: "Admin", Email: "admin@example.com", Password: "supersecret123"},
+		config.SeedUser{Name: "Customer", Email: "customer@example.com", Password: "supersecret456"},
+	)
 	require.NoError(t, err)
 
 	tokens := auth.NewTokenManager(strings.Repeat("i", 32), time.Hour)
