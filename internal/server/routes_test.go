@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"mini-ecommerce/api"
 	"mini-ecommerce/internal/auth"
 	"mini-ecommerce/internal/domain"
 	"mini-ecommerce/internal/handler"
@@ -262,3 +263,62 @@ func TestRegisterRoutesOrdersAccess(t *testing.T) {
 		})
 	}
 }
+
+func TestRegisterRoutesDocs(t *testing.T) {
+	s := &Server{db: fakeDatabase{}, docsHandler: handler.NewDocsHandler(api.OpenAPI)}
+
+	tests := []struct {
+		path        string
+		wantStatus  int
+		contentType string
+		location    string
+	}{
+		{path: "/docs", wantStatus: http.StatusOK, contentType: "text/html; charset=utf-8"},
+		{path: "/docs/openapi.yaml", wantStatus: http.StatusOK, contentType: "application/yaml"},
+		{path: "/docs/", wantStatus: http.StatusMovedPermanently, location: "/docs"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			s.RegisterRoutes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tt.path, nil))
+
+			assert.Equal(t, tt.wantStatus, rec.Code)
+			if tt.contentType != "" {
+				assert.Equal(t, tt.contentType, rec.Header().Get("Content-Type"))
+			}
+			if tt.location != "" {
+				assert.Equal(t, tt.location, rec.Header().Get("Location"))
+			}
+		})
+	}
+}
+
+func TestRegisterRoutesFallbacksUseJSON(t *testing.T) {
+	s := &Server{db: fakeDatabase{}}
+
+	rec := httptest.NewRecorder()
+	s.RegisterRoutes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/unknown", nil))
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.JSONEq(t, `{"error":{"code":"NOT_FOUND","message":"Route not found"}}`, rec.Body.String())
+
+	rec = httptest.NewRecorder()
+	s.RegisterRoutes().ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/health", nil))
+	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
+	assert.JSONEq(t, `{"error":{"code":"NOT_FOUND","message":"Method not allowed for this route"}}`, rec.Body.String())
+}
+
+func TestRegisterRoutesRecoversFromPanics(t *testing.T) {
+	s := &Server{db: panickingDatabase{}}
+
+	rec := httptest.NewRecorder()
+	s.RegisterRoutes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.JSONEq(t, `{"error":{"code":"INTERNAL_ERROR","message":"An unexpected error occurred"}}`, rec.Body.String())
+}
+
+type panickingDatabase struct {
+	fakeDatabase
+}
+
+func (panickingDatabase) Ping(context.Context) error { panic("driver exploded") }
