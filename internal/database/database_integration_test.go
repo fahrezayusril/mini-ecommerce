@@ -113,9 +113,10 @@ func TestSeedStoresHashedPasswordAndVersion7IDs(t *testing.T) {
 	require.NoError(t, err)
 
 	var id uuid.UUID
-	var passwordHash string
-	require.NoError(t, pool.QueryRow(ctx, `SELECT id, password_hash FROM users WHERE role = 'admin'`).Scan(&id, &passwordHash))
+	var email, passwordHash string
+	require.NoError(t, pool.QueryRow(ctx, `SELECT id, email, password_hash FROM users WHERE role = 'admin'`).Scan(&id, &email, &passwordHash))
 	assert.Equal(t, uuid.Version(7), id.Version())
+	assert.Equal(t, "admin@example.com", email)
 	assert.NotEqual(t, testAdmin().Password, passwordHash)
 	assert.Contains(t, passwordHash, "$2a$")
 }

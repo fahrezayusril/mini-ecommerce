@@ -25,5 +25,10 @@ func (s *Server) RegisterRoutes() http.Handler {
 	healthHandler := handler.NewHealthHandler(s.db)
 	r.Get("/health", healthHandler.Check)
 
+	r.Route("/api/v1", func(r chi.Router) {
+		r.Post("/auth/register", s.authHandler.Register)
+		r.Post("/auth/login", s.authHandler.Login)
+	})
+
 	return r
 }

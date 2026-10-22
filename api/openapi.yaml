@@ -17,6 +17,8 @@ servers:
 tags:
   - name: Health
     description: Service and dependency health
+  - name: Auth
+    description: Customer registration and login
 paths:
   /health:
     get:
@@ -53,6 +55,92 @@ paths:
               example:
                 status: degraded
                 database: unreachable
+  /api/v1/auth/register:
+    post:
+      tags:
+        - Auth
+      summary: Register a customer account
+      description: |
+        Creates a new user with role `customer` and returns a signed JWT.
+        Leading and trailing whitespace in `name` and `email` is trimmed, and the
+        email is stored in lowercase. Email uniqueness is case-insensitive.
+        The request body must be a single JSON object without unknown fields.
+      operationId: register
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+            example:
+              name: Jane Doe
+              email: jane@example.com
+              password: supersecret
+      responses:
+        '201':
+          description: Account created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+              example:
+                data:
+                  user:
+                    id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7b
+                    name: Jane Doe
+                    email: jane@example.com
+                    role: customer
+                  token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiY3VzdG9tZXIiLCJzdWIiOiIwMTkyYjNjNC01ZDZlLTdmODAtOWExYi0yYzNkNGU1ZjZhN2IiLCJleHAiOjE3OTI3NTY4MDAsImlhdCI6MTc5MjY3MDQwMH0.signature
+                  expires_at: '2026-10-23T10:00:00Z'
+        '400':
+          $ref: '#/components/responses/RegisterBadRequest'
+        '409':
+          $ref: '#/components/responses/EmailAlreadyExists'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/auth/login:
+    post:
+      tags:
+        - Auth
+      summary: Log in with email and password
+      description: |
+        Authenticates a user and returns a signed JWT. The email lookup is
+        case-insensitive. An unknown email and a wrong password produce the same
+        401 response.
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              email: jane@example.com
+              password: supersecret
+      responses:
+        '200':
+          description: Login succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+              example:
+                data:
+                  user:
+                    id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7b
+                    name: Jane Doe
+                    email: jane@example.com
+                    role: customer
+                  token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiY3VzdG9tZXIiLCJzdWIiOiIwMTkyYjNjNC01ZDZlLTdmODAtOWExYi0yYzNkNGU1ZjZhN2IiLCJleHAiOjE3OTI3NTY4MDAsImlhdCI6MTc5MjY3MDQwMH0.signature
+                  expires_at: '2026-10-23T10:00:00Z'
+        '400':
+          $ref: '#/components/responses/LoginBadRequest'
+        '401':
+          $ref: '#/components/responses/InvalidCredentials'
+        '500':
+          $ref: '#/components/responses/InternalError'
 components:
   securitySchemes:
     bearerAuth:
@@ -66,7 +154,225 @@ components:
       schema:
         type: string
         example: no-store
+  responses:
+    RegisterBadRequest:
+      description: The body is not valid JSON (`INVALID_JSON`) or fails validation (`VALIDATION_ERROR`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            validationError:
+              summary: Field validation failed
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Request validation failed
+                  details:
+                    - field: email
+                      message: must be a valid email
+                    - field: password
+                      message: must be at least 8 characters
+            invalidJson:
+              summary: Malformed JSON
+              value:
+                error:
+                  code: INVALID_JSON
+                  message: Request body contains malformed JSON
+            unknownField:
+              summary: Unknown field in body
+              value:
+                error:
+                  code: INVALID_JSON
+                  message: Request body contains unknown field "role"
+    LoginBadRequest:
+      description: The body is not valid JSON (`INVALID_JSON`) or fails validation (`VALIDATION_ERROR`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            validationError:
+              summary: Field validation failed
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Request validation failed
+                  details:
+                    - field: password
+                      message: is required
+            invalidJson:
+              summary: Empty body
+              value:
+                error:
+                  code: INVALID_JSON
+                  message: Request body must not be empty
+    Unauthorized:
+      description: Missing, malformed, invalid, or expired bearer token.
+      headers:
+        WWW-Authenticate:
+          description: Authentication challenge.
+          schema:
+            type: string
+            example: Bearer realm="api"
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: UNAUTHORIZED
+              message: Invalid or expired token
+    Forbidden:
+      description: The authenticated user's role is not allowed to perform this action.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: FORBIDDEN
+              message: You do not have permission to perform this action
+    InvalidCredentials:
+      description: The email is not registered or the password is wrong.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: INVALID_CREDENTIALS
+              message: Invalid email or password
+    EmailAlreadyExists:
+      description: An account with this email already exists (case-insensitive).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: EMAIL_ALREADY_EXISTS
+              message: Email is already registered
+    InternalError:
+      description: Unexpected server error. Internal details are never exposed.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: INTERNAL_ERROR
+              message: An unexpected error occurred
   schemas:
+    RegisterRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - email
+        - password
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Display name; surrounding whitespace is trimmed before validation.
+          example: Jane Doe
+        email:
+          type: string
+          format: email
+          maxLength: 255
+          description: Stored in lowercase; uniqueness is case-insensitive.
+          example: jane@example.com
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 72
+          description: 8 to 72 bytes (bcrypt limit).
+          example: supersecret
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          description: Matched case-insensitively.
+          example: jane@example.com
+        password:
+          type: string
+          format: password
+          minLength: 1
+          example: supersecret
+    Role:
+      type: string
+      enum:
+        - admin
+        - customer
+      example: customer
+    User:
+      type: object
+      required:
+        - id
+        - name
+        - email
+        - role
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7b
+        name:
+          type: string
+          example: Jane Doe
+        email:
+          type: string
+          format: email
+          example: jane@example.com
+        role:
+          $ref: '#/components/schemas/Role'
+    AuthPayload:
+      type: object
+      required:
+        - user
+        - token
+        - expires_at
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        token:
+          type: string
+          description: "HS256 JWT to send as `Authorization: Bearer <token>`."
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiY3VzdG9tZXIiLCJzdWIiOiIwMTkyYjNjNC01ZDZlLTdmODAtOWExYi0yYzNkNGU1ZjZhN2IiLCJleHAiOjE3OTI3NTY4MDAsImlhdCI6MTc5MjY3MDQwMH0.signature
+        expires_at:
+          type: string
+          format: date-time
+          description: Token expiry in RFC 3339 (UTC).
+          example: '2026-10-23T10:00:00Z'
+    AuthResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          $ref: '#/components/schemas/AuthPayload'
+    FieldError:
+      type: object
+      required:
+        - field
+        - message
+      properties:
+        field:
+          type: string
+          description: JSON field name that failed validation.
+          example: email
+        message:
+          type: string
+          example: must be a valid email
     HealthResponse:
       type: object
       required:
@@ -143,10 +449,14 @@ components:
               example: Request validation failed
             details:
               type: array
-              description: Optional structured details; shape depends on the error code.
+              description: |
+                Optional structured details; shape depends on the error code.
+                For `VALIDATION_ERROR` each item is a `FieldError`.
               items:
-                type: object
-                additionalProperties: true
+                anyOf:
+                  - $ref: '#/components/schemas/FieldError'
+                  - type: object
+                    additionalProperties: true
       example:
         error:
           code: VALIDATION_ERROR
