@@ -7,10 +7,14 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"mini-ecommerce/internal/auth"
 	"mini-ecommerce/internal/domain"
 	"mini-ecommerce/internal/handler"
 	"mini-ecommerce/internal/service"
@@ -98,6 +102,87 @@ func TestRegisterRoutesAuth(t *testing.T) {
 			s.RegisterRoutes().ServeHTTP(rec, req)
 
 			assert.Equal(t, tt.wantStatus, rec.Code)
+		})
+	}
+}
+
+type fakeProductService struct {
+	calls int
+}
+
+func (f *fakeProductService) List(context.Context, domain.ProductFilter) (service.ProductPage, error) {
+	f.calls++
+	return service.ProductPage{Page: 1, Limit: 10}, nil
+}
+
+func (f *fakeProductService) Get(_ context.Context, id uuid.UUID) (domain.Product, error) {
+	f.calls++
+	return domain.Product{ID: id}, nil
+}
+
+func (f *fakeProductService) Create(_ context.Context, input service.ProductInput) (domain.Product, error) {
+	f.calls++
+	return domain.Product{ID: uuid.Must(uuid.NewV7()), Name: input.Name}, nil
+}
+
+func (f *fakeProductService) Update(_ context.Context, id uuid.UUID, input service.ProductInput) (domain.Product, error) {
+	f.calls++
+	return domain.Product{ID: id, Name: input.Name}, nil
+}
+
+func (f *fakeProductService) Delete(context.Context, uuid.UUID) error {
+	f.calls++
+	return nil
+}
+
+func TestRegisterRoutesProductsAccess(t *testing.T) {
+	tokens := auth.NewTokenManager(strings.Repeat("r", 32), time.Hour)
+	adminToken, _, err := tokens.Issue(uuid.Must(uuid.NewV7()), domain.RoleAdmin)
+	require.NoError(t, err)
+	customerToken, _, err := tokens.Issue(uuid.Must(uuid.NewV7()), domain.RoleCustomer)
+	require.NoError(t, err)
+
+	productPath := "/api/v1/products/" + uuid.Must(uuid.NewV7()).String()
+	body := `{"name":"A","description":"","price":1,"category":"B","stock":1}`
+
+	tests := []struct {
+		name       string
+		method     string
+		path       string
+		token      string
+		wantStatus int
+		wantCalled bool
+	}{
+		{name: "list is public", method: http.MethodGet, path: "/api/v1/products", wantStatus: http.StatusOK, wantCalled: true},
+		{name: "list with trailing slash", method: http.MethodGet, path: "/api/v1/products/", wantStatus: http.StatusOK, wantCalled: true},
+		{name: "detail is public", method: http.MethodGet, path: productPath, wantStatus: http.StatusOK, wantCalled: true},
+		{name: "create without token", method: http.MethodPost, path: "/api/v1/products", wantStatus: http.StatusUnauthorized},
+		{name: "update without token", method: http.MethodPut, path: productPath, wantStatus: http.StatusUnauthorized},
+		{name: "delete without token", method: http.MethodDelete, path: productPath, wantStatus: http.StatusUnauthorized},
+		{name: "create as customer", method: http.MethodPost, path: "/api/v1/products", token: customerToken, wantStatus: http.StatusForbidden},
+		{name: "update as customer", method: http.MethodPut, path: productPath, token: customerToken, wantStatus: http.StatusForbidden},
+		{name: "delete as customer", method: http.MethodDelete, path: productPath, token: customerToken, wantStatus: http.StatusForbidden},
+		{name: "create as admin", method: http.MethodPost, path: "/api/v1/products", token: adminToken, wantStatus: http.StatusCreated, wantCalled: true},
+		{name: "update as admin", method: http.MethodPut, path: productPath, token: adminToken, wantStatus: http.StatusOK, wantCalled: true},
+		{name: "delete as admin", method: http.MethodDelete, path: productPath, token: adminToken, wantStatus: http.StatusNoContent, wantCalled: true},
+		{name: "invalid uuid checked after auth", method: http.MethodDelete, path: "/api/v1/products/not-a-uuid", wantStatus: http.StatusUnauthorized},
+		{name: "patch not allowed", method: http.MethodPatch, path: productPath, token: adminToken, wantStatus: http.StatusMethodNotAllowed},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			products := &fakeProductService{}
+			s := &Server{db: fakeDatabase{}, tokenParser: tokens, productHandler: handler.NewProductHandler(products)}
+
+			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(body))
+			if tt.token != "" {
+				req.Header.Set("Authorization", "Bearer "+tt.token)
+			}
+			rec := httptest.NewRecorder()
+			s.RegisterRoutes().ServeHTTP(rec, req)
+
+			assert.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+			assert.Equal(t, tt.wantCalled, products.calls > 0)
 		})
 	}
 }

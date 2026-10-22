@@ -9,6 +9,7 @@ import (
 	"mini-ecommerce/internal/config"
 	"mini-ecommerce/internal/database"
 	"mini-ecommerce/internal/handler"
+	appmiddleware "mini-ecommerce/internal/middleware"
 	"mini-ecommerce/internal/repository"
 	"mini-ecommerce/internal/service"
 )
@@ -18,7 +19,9 @@ type Server struct {
 
 	db database.Service
 
-	authHandler *handler.AuthHandler
+	tokenParser    appmiddleware.TokenParser
+	authHandler    *handler.AuthHandler
+	productHandler *handler.ProductHandler
 }
 
 func NewServer(cfg config.Config, db database.Service) (*http.Server, error) {
@@ -34,7 +37,9 @@ func NewServer(cfg config.Config, db database.Service) (*http.Server, error) {
 
 		db: db,
 
-		authHandler: handler.NewAuthHandler(authService),
+		tokenParser:    tokenManager,
+		authHandler:    handler.NewAuthHandler(authService),
+		productHandler: handler.NewProductHandler(service.NewProductService(repository.NewProductRepository(db.Pool()))),
 	}
 
 	// Declare Server config

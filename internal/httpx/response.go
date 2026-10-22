@@ -24,6 +24,18 @@ type DataResponse struct {
 	Data any `json:"data"`
 }
 
+type PaginationMeta struct {
+	Page       int `json:"page"`
+	Limit      int `json:"limit"`
+	Total      int `json:"total"`
+	TotalPages int `json:"total_pages"`
+}
+
+type ListResponse struct {
+	Data any            `json:"data"`
+	Meta PaginationMeta `json:"meta"`
+}
+
 type ErrorBody struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
@@ -44,6 +56,10 @@ func WriteJSON(w http.ResponseWriter, status int, body any) {
 
 func WriteData(w http.ResponseWriter, status int, data any) {
 	WriteJSON(w, status, DataResponse{Data: data})
+}
+
+func WriteList(w http.ResponseWriter, data any, meta PaginationMeta) {
+	WriteJSON(w, http.StatusOK, ListResponse{Data: data, Meta: meta})
 }
 
 func WriteError(w http.ResponseWriter, status int, code, message string, details any) {
