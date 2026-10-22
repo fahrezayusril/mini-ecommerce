@@ -1,18 +1,23 @@
 package server
 
 import (
-	"encoding/json"
-	"log"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+
+	"mini-ecommerce/internal/domain"
+	"mini-ecommerce/internal/handler"
+	appmiddleware "mini-ecommerce/internal/middleware"
 )
 
 func (s *Server) RegisterRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
+	r.Use(appmiddleware.Recover)
+	r.NotFound(handler.RouteNotFound)
+	r.MethodNotAllowed(handler.MethodNotAllowed)
 
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"https://*", "http://*"},
@@ -22,26 +27,37 @@ func (s *Server) RegisterRoutes() http.Handler {
 		MaxAge:           300,
 	}))
 
-	r.Get("/", s.HelloWorldHandler)
+	healthHandler := handler.NewHealthHandler(s.db)
+	r.Get("/health", healthHandler.Check)
 
-	r.Get("/health", s.healthHandler)
+	r.Get(handler.DocsPath, s.docsHandler.UI)
+	r.Get(handler.DocsPath+"/", s.docsHandler.RedirectToUI)
+	r.Get(handler.DocsPath+"/openapi.yaml", s.docsHandler.Spec)
+
+	r.Route("/api/v1", func(r chi.Router) {
+		r.Post("/auth/register", s.authHandler.Register)
+		r.Post("/auth/login", s.authHandler.Login)
+
+		r.Route("/products", func(r chi.Router) {
+			r.Get("/", s.productHandler.List)
+			r.Get("/{id}", s.productHandler.Get)
+
+			r.Group(func(r chi.Router) {
+				r.Use(appmiddleware.Authenticate(s.tokenParser), appmiddleware.RequireRole(domain.RoleAdmin))
+				r.Post("/", s.productHandler.Create)
+				r.Put("/{id}", s.productHandler.Update)
+				r.Delete("/{id}", s.productHandler.Delete)
+			})
+		})
+
+		r.Route("/orders", func(r chi.Router) {
+			r.Use(appmiddleware.Authenticate(s.tokenParser))
+			r.With(appmiddleware.RequireRole(domain.RoleCustomer)).Post("/", s.orderHandler.Create)
+			r.Get("/", s.orderHandler.List)
+			r.Get("/{id}", s.orderHandler.Get)
+			r.With(appmiddleware.RequireRole(domain.RoleAdmin)).Patch("/{id}/status", s.orderHandler.UpdateStatus)
+		})
+	})
 
 	return r
-}
-
-func (s *Server) HelloWorldHandler(w http.ResponseWriter, r *http.Request) {
-	resp := make(map[string]string)
-	resp["message"] = "Hello World"
-
-	jsonResp, err := json.Marshal(resp)
-	if err != nil {
-		log.Fatalf("error handling JSON marshal. Err: %v", err)
-	}
-
-	_, _ = w.Write(jsonResp)
-}
-
-func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
-	jsonResp, _ := json.Marshal(s.db.Health())
-	_, _ = w.Write(jsonResp)
 }
