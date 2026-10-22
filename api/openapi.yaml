@@ -10,10 +10,20 @@ info:
     (`/health`, `/docs`) are served at the root.
 
     Protected endpoints require an `Authorization: Bearer <jwt>` header obtained
-    from the login or register endpoints.
+    from the login or register endpoints. In the docs UI, use **Authorize** once;
+    the token is kept across page reloads.
+
+    Every error uses the envelope `{"error": {"code", "message", "details?"}}`.
+    This also applies outside the documented operations: an unknown route returns
+    404 and an unsupported method on a known route returns 405, both with code
+    `NOT_FOUND`. Any endpoint may return 500 `INTERNAL_ERROR`; internal details are
+    never exposed.
+
+    Money values are JSON numbers with exactly 2 decimal places. Timestamps are
+    RFC 3339 in UTC.
 servers:
-  - url: http://localhost:8080
-    description: Local development
+  - url: /
+    description: Same origin as this document
 tags:
   - name: Health
     description: Service and dependency health
@@ -23,6 +33,8 @@ tags:
     description: Product catalog. Reading is public; writing requires an admin token.
   - name: Orders
     description: Checkout and order history. All endpoints require a bearer token.
+  - name: Docs
+    description: Interactive documentation and the raw OpenAPI document
 paths:
   /health:
     get:
@@ -59,6 +71,39 @@ paths:
               example:
                 status: degraded
                 database: unreachable
+  /docs:
+    get:
+      tags:
+        - Docs
+      summary: Interactive API documentation
+      description: |
+        Swagger UI (pinned version, loaded from a CDN with subresource integrity)
+        rendering `/docs/openapi.yaml`, with `persistAuthorization` enabled.
+        `GET /docs/` redirects here with 301.
+      operationId: getDocs
+      security: []
+      responses:
+        '200':
+          description: HTML page.
+          content:
+            text/html:
+              schema:
+                type: string
+  /docs/openapi.yaml:
+    get:
+      tags:
+        - Docs
+      summary: OpenAPI document
+      description: This document, embedded in the binary at build time.
+      operationId: getOpenAPISpec
+      security: []
+      responses:
+        '200':
+          description: OpenAPI 3.0.3 document.
+          content:
+            application/yaml:
+              schema:
+                type: string
   /api/v1/auth/register:
     post:
       tags:
@@ -757,20 +802,60 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
-          example:
-            error:
-              code: VALIDATION_ERROR
-              message: Request validation failed
-              details:
-                - field: status
-                  message: must be one of PENDING, COMPLETED, CANCELLED
+          examples:
+            invalidStatus:
+              summary: Status outside the enum
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Request validation failed
+                  details:
+                    - field: status
+                      message: must be one of PENDING, COMPLETED, CANCELLED
+            invalidPaging:
+              summary: Page and limit out of range
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Request validation failed
+                  details:
+                    - field: page
+                      message: must be greater than or equal to 1
+                    - field: limit
+                      message: must be less than or equal to 100
+            malformedQuery:
+              summary: Query string is not valid URL encoding
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Request validation failed
+                  details:
+                    - field: query
+                      message: must be a valid URL-encoded query string
     OrderStatusBadRequest:
-      description: The `id` is not a UUID or the body is invalid.
+      description: |
+        The `id` is not a UUID, the body is not valid JSON (`INVALID_JSON`), or
+        `status` is missing or not `COMPLETED`/`CANCELLED` (`VALIDATION_ERROR`).
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
           examples:
+            missingStatus:
+              summary: Status missing
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Request validation failed
+                  details:
+                    - field: status
+                      message: is required
+            invalidJson:
+              summary: Wrong field type
+              value:
+                error:
+                  code: INVALID_JSON
+                  message: Field "status" has an invalid type
             invalidStatus:
               summary: Status outside COMPLETED and CANCELLED
               value:
@@ -1186,10 +1271,12 @@ components:
         created_at:
           type: string
           format: date-time
+          description: RFC 3339 in UTC with fractional seconds when non-zero.
           example: '2026-10-22T10:00:00.123456Z'
         updated_at:
           type: string
           format: date-time
+          description: RFC 3339 in UTC with fractional seconds when non-zero. Set on every status change.
           example: '2026-10-22T10:00:00.123456Z'
     OrderResponse:
       type: object
@@ -1380,7 +1467,7 @@ components:
           format: password
           minLength: 8
           maxLength: 72
-          description: 8 to 72 bytes (bcrypt limit).
+          description: At least 8 characters and at most 72 bytes (bcrypt limit).
           example: supersecret
     LoginRequest:
       type: object
@@ -1459,7 +1546,10 @@ components:
       properties:
         field:
           type: string
-          description: JSON field name that failed validation.
+          description: |
+            Name or path of the invalid input: a body field (`email`,
+            `items[0].quantity`), a query parameter (`limit`), the path parameter
+            `id`, or `query` when the query string itself is malformed.
           example: email
         message:
           type: string

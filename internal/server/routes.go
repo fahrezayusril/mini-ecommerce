@@ -15,6 +15,9 @@ import (
 func (s *Server) RegisterRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
+	r.Use(appmiddleware.Recover)
+	r.NotFound(handler.RouteNotFound)
+	r.MethodNotAllowed(handler.MethodNotAllowed)
 
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"https://*", "http://*"},
@@ -26,6 +29,10 @@ func (s *Server) RegisterRoutes() http.Handler {
 
 	healthHandler := handler.NewHealthHandler(s.db)
 	r.Get("/health", healthHandler.Check)
+
+	r.Get(handler.DocsPath, s.docsHandler.UI)
+	r.Get(handler.DocsPath+"/", s.docsHandler.RedirectToUI)
+	r.Get(handler.DocsPath+"/openapi.yaml", s.docsHandler.Spec)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Post("/auth/register", s.authHandler.Register)

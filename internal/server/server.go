@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"mini-ecommerce/api"
 	"mini-ecommerce/internal/auth"
 	"mini-ecommerce/internal/config"
 	"mini-ecommerce/internal/database"
@@ -24,6 +25,7 @@ type Server struct {
 	authHandler    *handler.AuthHandler
 	productHandler *handler.ProductHandler
 	orderHandler   *handler.OrderHandler
+	docsHandler    *handler.DocsHandler
 }
 
 func NewServer(cfg config.Config, db database.Service) (*http.Server, error) {
@@ -48,6 +50,7 @@ func NewServer(cfg config.Config, db database.Service) (*http.Server, error) {
 		authHandler:    handler.NewAuthHandler(authService),
 		productHandler: handler.NewProductHandler(service.NewProductService(repository.NewProductRepository(db.Pool()))),
 		orderHandler:   handler.NewOrderHandler(orderService),
+		docsHandler:    handler.NewDocsHandler(api.OpenAPI),
 	}
 
 	// Declare Server config
