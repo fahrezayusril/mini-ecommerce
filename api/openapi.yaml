@@ -1,0 +1,156 @@
+openapi: 3.0.3
+info:
+  title: Mini E-Commerce API
+  version: 1.0.0
+  description: |
+    REST API for a mini e-commerce platform: user authentication, product catalog,
+    and order checkout.
+
+    Business endpoints live under the `/api/v1` prefix. Operational endpoints
+    (`/health`, `/docs`) are served at the root.
+
+    Protected endpoints require an `Authorization: Bearer <jwt>` header obtained
+    from the login or register endpoints.
+servers:
+  - url: http://localhost:8080
+    description: Local development
+tags:
+  - name: Health
+    description: Service and dependency health
+paths:
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Check service health
+      description: |
+        Pings the database with a short timeout (2 seconds). Returns 200 when the
+        database is reachable and 503 otherwise.
+      operationId: getHealth
+      security: []
+      responses:
+        '200':
+          description: Service and database are healthy.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: ok
+                database: ok
+        '503':
+          description: Database is unreachable.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: degraded
+                database: unreachable
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: HS256 JWT with claims `sub` (user id), `role` (`admin` or `customer`), and `exp`.
+  headers:
+    NoStore:
+      description: Responses must not be cached.
+      schema:
+        type: string
+        example: no-store
+  schemas:
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - database
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+            - degraded
+          example: ok
+        database:
+          type: string
+          enum:
+            - ok
+            - unreachable
+          example: ok
+    PaginationMeta:
+      type: object
+      required:
+        - page
+        - limit
+        - total
+        - total_pages
+      properties:
+        page:
+          type: integer
+          minimum: 1
+          example: 1
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          example: 10
+        total:
+          type: integer
+          minimum: 0
+          example: 42
+        total_pages:
+          type: integer
+          minimum: 0
+          example: 5
+    ErrorCode:
+      type: string
+      enum:
+        - VALIDATION_ERROR
+        - INVALID_JSON
+        - UNAUTHORIZED
+        - INVALID_CREDENTIALS
+        - FORBIDDEN
+        - NOT_FOUND
+        - PRODUCT_NOT_FOUND
+        - EMAIL_ALREADY_EXISTS
+        - INSUFFICIENT_STOCK
+        - INVALID_STATUS_TRANSITION
+        - INTERNAL_ERROR
+      example: VALIDATION_ERROR
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              $ref: '#/components/schemas/ErrorCode'
+            message:
+              type: string
+              example: Request validation failed
+            details:
+              type: array
+              description: Optional structured details; shape depends on the error code.
+              items:
+                type: object
+                additionalProperties: true
+      example:
+        error:
+          code: VALIDATION_ERROR
+          message: Request validation failed
+          details:
+            - field: email
+              message: must be a valid email
