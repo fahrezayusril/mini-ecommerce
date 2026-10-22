@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
 
 	"mini-ecommerce/internal/config"
 	"mini-ecommerce/internal/database"
@@ -39,8 +40,12 @@ func setupPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-func testAdmin() config.SeedAdmin {
-	return config.SeedAdmin{Name: "Test Admin", Email: "Admin@Example.com", Password: "supersecret123"}
+func testAdmin() config.SeedUser {
+	return config.SeedUser{Name: "Test Admin", Email: "Admin@Example.com", Password: "supersecret123"}
+}
+
+func testCustomer() config.SeedUser {
+	return config.SeedUser{Name: "Test Customer", Email: " Customer@Example.com ", Password: "supersecret456"}
 }
 
 func TestMigrationsCreateAllTables(t *testing.T) {
@@ -74,22 +79,29 @@ func TestSeedIsIdempotent(t *testing.T) {
 	pool := setupPool(t)
 	ctx := context.Background()
 
-	first, err := database.Seed(ctx, pool, testAdmin())
+	first, err := database.Seed(ctx, pool, testAdmin(), testCustomer())
 	require.NoError(t, err)
 	assert.True(t, first.AdminCreated)
+	assert.True(t, first.CustomerCreated)
 	assert.Equal(t, 10, first.ProductsCreated)
 
-	sameEmailDifferentCase := testAdmin()
-	sameEmailDifferentCase.Email = "admin@example.com"
-	second, err := database.Seed(ctx, pool, sameEmailDifferentCase)
+	adminDifferentCase := testAdmin()
+	adminDifferentCase.Email = "admin@example.com"
+	customerDifferentCase := testCustomer()
+	customerDifferentCase.Email = "CUSTOMER@example.com"
+	second, err := database.Seed(ctx, pool, adminDifferentCase, customerDifferentCase)
 	require.NoError(t, err)
 	assert.False(t, second.AdminCreated)
+	assert.False(t, second.CustomerCreated)
 	assert.Zero(t, second.ProductsCreated)
 
-	var admins, users int
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE role = 'admin'), count(*) FROM users`).Scan(&admins, &users))
+	var admins, customers, users int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FILTER (WHERE role = 'admin'), count(*) FILTER (WHERE role = 'customer'), count(*) FROM users`,
+	).Scan(&admins, &customers, &users))
 	assert.Equal(t, 1, admins)
-	assert.Equal(t, 1, users)
+	assert.Equal(t, 1, customers)
+	assert.Equal(t, 2, users)
 
 	var products, categories, outOfStock int
 	require.NoError(t, pool.QueryRow(ctx,
@@ -109,16 +121,32 @@ func TestSeedStoresHashedPasswordAndVersion7IDs(t *testing.T) {
 	pool := setupPool(t)
 	ctx := context.Background()
 
-	_, err := database.Seed(ctx, pool, testAdmin())
+	_, err := database.Seed(ctx, pool, testAdmin(), testCustomer())
 	require.NoError(t, err)
 
-	var id uuid.UUID
-	var email, passwordHash string
-	require.NoError(t, pool.QueryRow(ctx, `SELECT id, email, password_hash FROM users WHERE role = 'admin'`).Scan(&id, &email, &passwordHash))
-	assert.Equal(t, uuid.Version(7), id.Version())
-	assert.Equal(t, "admin@example.com", email)
-	assert.NotEqual(t, testAdmin().Password, passwordHash)
-	assert.Contains(t, passwordHash, "$2a$")
+	cases := []struct {
+		role     string
+		name     string
+		email    string
+		password string
+	}{
+		{role: "admin", name: "Test Admin", email: "admin@example.com", password: testAdmin().Password},
+		{role: "customer", name: "Test Customer", email: "customer@example.com", password: testCustomer().Password},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.role, func(t *testing.T) {
+			var id uuid.UUID
+			var name, email, passwordHash string
+			require.NoError(t, pool.QueryRow(ctx,
+				`SELECT id, name, email, password_hash FROM users WHERE role = $1`, tc.role,
+			).Scan(&id, &name, &email, &passwordHash))
+			assert.Equal(t, uuid.Version(7), id.Version())
+			assert.Equal(t, tc.name, name)
+			assert.Equal(t, tc.email, email)
+			assert.NoError(t, bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(tc.password)))
+		})
+	}
 }
 
 func TestUniqueEmailIsCaseInsensitive(t *testing.T) {
@@ -139,7 +167,7 @@ func TestCheckConstraints(t *testing.T) {
 	pool := setupPool(t)
 	ctx := context.Background()
 
-	_, err := database.Seed(ctx, pool, testAdmin())
+	_, err := database.Seed(ctx, pool, testAdmin(), testCustomer())
 	require.NoError(t, err)
 
 	var userID, productID uuid.UUID

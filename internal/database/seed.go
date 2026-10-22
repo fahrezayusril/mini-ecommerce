@@ -3,7 +3,6 @@ package database
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -11,7 +10,9 @@ import (
 	"github.com/shopspring/decimal"
 	"golang.org/x/crypto/bcrypt"
 
+	"mini-ecommerce/internal/auth"
 	"mini-ecommerce/internal/config"
+	"mini-ecommerce/internal/domain"
 )
 
 const seedAdvisoryLockKey int64 = 7_203_114_001
@@ -39,13 +40,18 @@ var sampleProducts = []seedProduct{
 
 type SeedResult struct {
 	AdminCreated    bool
+	CustomerCreated bool
 	ProductsCreated int
 }
 
-func Seed(ctx context.Context, pool *pgxpool.Pool, admin config.SeedAdmin) (SeedResult, error) {
-	passwordHash, err := bcrypt.GenerateFromPassword([]byte(admin.Password), bcrypt.DefaultCost)
+func Seed(ctx context.Context, pool *pgxpool.Pool, admin, customer config.SeedUser) (SeedResult, error) {
+	adminHash, err := auth.HashPassword(admin.Password, bcrypt.DefaultCost)
 	if err != nil {
-		return SeedResult{}, fmt.Errorf("hash admin password: %w", err)
+		return SeedResult{}, fmt.Errorf("seed admin: %w", err)
+	}
+	customerHash, err := auth.HashPassword(customer.Password, bcrypt.DefaultCost)
+	if err != nil {
+		return SeedResult{}, fmt.Errorf("seed customer: %w", err)
 	}
 
 	var result SeedResult
@@ -54,17 +60,16 @@ func Seed(ctx context.Context, pool *pgxpool.Pool, admin config.SeedAdmin) (Seed
 			return fmt.Errorf("acquire seed lock: %w", err)
 		}
 
-		created, err := seedAdmin(ctx, tx, admin, string(passwordHash))
-		if err != nil {
+		var err error
+		if result.AdminCreated, err = seedUser(ctx, tx, admin, domain.RoleAdmin, adminHash); err != nil {
 			return err
 		}
-		result.AdminCreated = created
-
-		count, err := seedProducts(ctx, tx)
-		if err != nil {
+		if result.CustomerCreated, err = seedUser(ctx, tx, customer, domain.RoleCustomer, customerHash); err != nil {
 			return err
 		}
-		result.ProductsCreated = count
+		if result.ProductsCreated, err = seedProducts(ctx, tx); err != nil {
+			return err
+		}
 		return nil
 	})
 	if err != nil {
@@ -73,10 +78,12 @@ func Seed(ctx context.Context, pool *pgxpool.Pool, admin config.SeedAdmin) (Seed
 	return result, nil
 }
 
-func seedAdmin(ctx context.Context, tx pgx.Tx, admin config.SeedAdmin, passwordHash string) (bool, error) {
+func seedUser(ctx context.Context, tx pgx.Tx, user config.SeedUser, role, passwordHash string) (bool, error) {
+	email := auth.NormalizeEmail(user.Email)
+
 	var exists bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE lower(email) = lower($1))`, admin.Email).Scan(&exists); err != nil {
-		return false, fmt.Errorf("check admin existence: %w", err)
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE lower(email) = $1)`, email).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check %s existence: %w", role, err)
 	}
 	if exists {
 		return false, nil
@@ -84,15 +91,15 @@ func seedAdmin(ctx context.Context, tx pgx.Tx, admin config.SeedAdmin, passwordH
 
 	id, err := uuid.NewV7()
 	if err != nil {
-		return false, fmt.Errorf("generate admin id: %w", err)
+		return false, fmt.Errorf("generate %s id: %w", role, err)
 	}
 
 	_, err = tx.Exec(ctx,
-		`INSERT INTO users (id, name, email, password_hash, role) VALUES ($1, $2, $3, $4, 'admin')`,
-		id, admin.Name, strings.ToLower(admin.Email), passwordHash,
+		`INSERT INTO users (id, name, email, password_hash, role) VALUES ($1, $2, $3, $4, $5)`,
+		id, user.Name, email, passwordHash, role,
 	)
 	if err != nil {
-		return false, fmt.Errorf("insert admin: %w", err)
+		return false, fmt.Errorf("insert %s: %w", role, err)
 	}
 	return true, nil
 }
