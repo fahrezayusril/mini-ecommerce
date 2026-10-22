@@ -64,7 +64,7 @@ func structFieldErrors(payload any) ([]FieldError, error) {
 
 	details := make([]FieldError, 0, len(validationErrs))
 	for _, fieldErr := range validationErrs {
-		details = append(details, FieldError{Field: fieldErr.Field(), Message: fieldErrorMessage(fieldErr)})
+		details = append(details, FieldError{Field: fieldPath(fieldErr), Message: fieldErrorMessage(fieldErr)})
 	}
 	return details, nil
 }
@@ -81,18 +81,38 @@ func validationFailed(details []FieldError) *requestError {
 	}
 }
 
+func fieldPath(fieldErr validator.FieldError) string {
+	_, path, found := strings.Cut(fieldErr.Namespace(), ".")
+	if !found {
+		return fieldErr.Field()
+	}
+	return path
+}
+
 func fieldErrorMessage(fieldErr validator.FieldError) string {
+	isList := fieldErr.Kind() == reflect.Slice
 	switch fieldErr.Tag() {
 	case "required":
 		return "is required"
 	case "email":
 		return "must be a valid email"
+	case "uuid":
+		return "must be a valid UUID"
 	case "min":
+		if isList && fieldErr.Param() == "1" {
+			return "must contain at least 1 item"
+		}
+		if isList {
+			return fmt.Sprintf("must contain at least %s items", fieldErr.Param())
+		}
 		if fieldErr.Param() == "1" {
 			return "must not be empty"
 		}
 		return fmt.Sprintf("must be at least %s characters", fieldErr.Param())
 	case "max":
+		if isList {
+			return fmt.Sprintf("must contain at most %s items", fieldErr.Param())
+		}
 		return fmt.Sprintf("must be at most %s characters", fieldErr.Param())
 	case "gte":
 		return fmt.Sprintf("must be greater than or equal to %s", fieldErr.Param())
