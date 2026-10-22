@@ -1,0 +1,1651 @@
+openapi: 3.0.3
+info:
+  title: Mini E-Commerce API
+  version: 1.0.0
+  description: |
+    REST API for a mini e-commerce platform: user authentication, product catalog,
+    and order checkout.
+
+    Business endpoints live under the `/api/v1` prefix. Operational endpoints
+    (`/health`, `/docs`) are served at the root.
+
+    Protected endpoints require an `Authorization: Bearer <jwt>` header obtained
+    from the login or register endpoints. In the docs UI, use **Authorize** once;
+    the token is kept across page reloads.
+
+    Every error uses the envelope `{"error": {"code", "message", "details?"}}`.
+    This also applies outside the documented operations: an unknown route returns
+    404 and an unsupported method on a known route returns 405, both with code
+    `NOT_FOUND`. Any endpoint may return 500 `INTERNAL_ERROR`; internal details are
+    never exposed.
+
+    Money values are JSON numbers with exactly 2 decimal places. Timestamps are
+    RFC 3339 in UTC.
+servers:
+  - url: /
+    description: Same origin as this document
+tags:
+  - name: Health
+    description: Service and dependency health
+  - name: Auth
+    description: Customer registration and login
+  - name: Products
+    description: Product catalog. Reading is public; writing requires an admin token.
+  - name: Orders
+    description: Checkout and order history. All endpoints require a bearer token.
+  - name: Docs
+    description: Interactive documentation and the raw OpenAPI document
+paths:
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Check service health
+      description: |
+        Pings the database with a short timeout (2 seconds). Returns 200 when the
+        database is reachable and 503 otherwise.
+      operationId: getHealth
+      security: []
+      responses:
+        '200':
+          description: Service and database are healthy.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: ok
+                database: ok
+        '503':
+          description: Database is unreachable.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: degraded
+                database: unreachable
+  /docs:
+    get:
+      tags:
+        - Docs
+      summary: Interactive API documentation
+      description: |
+        Swagger UI (pinned version, loaded from a CDN with subresource integrity)
+        rendering `/docs/openapi.yaml`, with `persistAuthorization` enabled.
+        `GET /docs/` redirects here with 301.
+      operationId: getDocs
+      security: []
+      responses:
+        '200':
+          description: HTML page.
+          content:
+            text/html:
+              schema:
+                type: string
+  /docs/openapi.yaml:
+    get:
+      tags:
+        - Docs
+      summary: OpenAPI document
+      description: This document, embedded in the binary at build time.
+      operationId: getOpenAPISpec
+      security: []
+      responses:
+        '200':
+          description: OpenAPI 3.0.3 document.
+          content:
+            application/yaml:
+              schema:
+                type: string
+  /api/v1/auth/register:
+    post:
+      tags:
+        - Auth
+      summary: Register a customer account
+      description: |
+        Creates a new user with role `customer` and returns a signed JWT.
+        Leading and trailing whitespace in `name` and `email` is trimmed, and the
+        email is stored in lowercase. Email uniqueness is case-insensitive.
+        The request body must be a single JSON object without unknown fields.
+      operationId: register
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+            example:
+              name: Jane Doe
+              email: jane@example.com
+              password: supersecret
+      responses:
+        '201':
+          description: Account created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+              example:
+                data:
+                  user:
+                    id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7b
+                    name: Jane Doe
+                    email: jane@example.com
+                    role: customer
+                  token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiY3VzdG9tZXIiLCJzdWIiOiIwMTkyYjNjNC01ZDZlLTdmODAtOWExYi0yYzNkNGU1ZjZhN2IiLCJleHAiOjE3OTI3NTY4MDAsImlhdCI6MTc5MjY3MDQwMH0.signature
+                  expires_at: '2026-10-23T10:00:00Z'
+        '400':
+          $ref: '#/components/responses/RegisterBadRequest'
+        '409':
+          $ref: '#/components/responses/EmailAlreadyExists'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/auth/login:
+    post:
+      tags:
+        - Auth
+      summary: Log in with email and password
+      description: |
+        Authenticates a user and returns a signed JWT. The email lookup is
+        case-insensitive. An unknown email and a wrong password produce the same
+        401 response.
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              email: jane@example.com
+              password: supersecret
+      responses:
+        '200':
+          description: Login succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+              example:
+                data:
+                  user:
+                    id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7b
+                    name: Jane Doe
+                    email: jane@example.com
+                    role: customer
+                  token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiY3VzdG9tZXIiLCJzdWIiOiIwMTkyYjNjNC01ZDZlLTdmODAtOWExYi0yYzNkNGU1ZjZhN2IiLCJleHAiOjE3OTI3NTY4MDAsImlhdCI6MTc5MjY3MDQwMH0.signature
+                  expires_at: '2026-10-23T10:00:00Z'
+        '400':
+          $ref: '#/components/responses/LoginBadRequest'
+        '401':
+          $ref: '#/components/responses/InvalidCredentials'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/products:
+    get:
+      tags:
+        - Products
+      summary: List products
+      description: |
+        Returns active (not soft-deleted) products with filtering, sorting, and
+        pagination. Results are ordered by the chosen `sort` column and then by
+        `id` in the same direction, so pages are stable. `meta.total` counts all
+        products matching the same filters. A page beyond the last one returns an
+        empty `data` array. Every query parameter that is present must have a
+        non-empty value; unknown parameters are ignored. A query string that is not
+        valid URL encoding (for example a raw `;`) is rejected with field `query`.
+      operationId: listProducts
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Category'
+        - $ref: '#/components/parameters/MinPrice'
+        - $ref: '#/components/parameters/MaxPrice'
+        - $ref: '#/components/parameters/InStock'
+        - $ref: '#/components/parameters/ProductSort'
+        - $ref: '#/components/parameters/SortOrder'
+      responses:
+        '200':
+          description: A page of products.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductList'
+              example:
+                data:
+                  - id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7c
+                    name: Wireless Mouse
+                    description: Ergonomic 2.4GHz wireless mouse with silent clicks
+                    price: 149000.00
+                    category: Electronics
+                    stock: 120
+                    created_at: '2026-10-22T09:00:00Z'
+                    updated_at: '2026-10-22T09:00:00Z'
+                meta:
+                  page: 1
+                  limit: 10
+                  total: 1
+                  total_pages: 1
+        '400':
+          $ref: '#/components/responses/ProductListBadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags:
+        - Products
+      summary: Create a product
+      description: Admin only. All fields are required. `name`, `description`, and `category` are trimmed.
+      operationId: createProduct
+      security:
+        - bearerAuth: []
+      requestBody:
+        $ref: '#/components/requestBodies/ProductInput'
+      responses:
+        '201':
+          description: Product created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResponse'
+              example:
+                data:
+                  id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7c
+                  name: Wireless Mouse
+                  description: Ergonomic 2.4GHz wireless mouse with silent clicks
+                  price: 149000.00
+                  category: Electronics
+                  stock: 120
+                  created_at: '2026-10-22T09:00:00Z'
+                  updated_at: '2026-10-22T09:00:00Z'
+        '400':
+          $ref: '#/components/responses/ProductBodyBadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/products/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ProductId'
+    get:
+      tags:
+        - Products
+      summary: Get a product
+      description: Returns an active product. Missing and soft-deleted products both return 404.
+      operationId: getProduct
+      security: []
+      responses:
+        '200':
+          description: The product.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResponse'
+              example:
+                data:
+                  id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7c
+                  name: Wireless Mouse
+                  description: Ergonomic 2.4GHz wireless mouse with silent clicks
+                  price: 149000.00
+                  category: Electronics
+                  stock: 120
+                  created_at: '2026-10-22T09:00:00Z'
+                  updated_at: '2026-10-22T09:00:00Z'
+        '400':
+          $ref: '#/components/responses/InvalidId'
+        '404':
+          $ref: '#/components/responses/ProductNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags:
+        - Products
+      summary: Replace a product
+      description: |
+        Admin only. Full replacement: every field is required. Sets `updated_at`
+        to the current time. Soft-deleted products return 404. Authentication is
+        checked before the `id` format.
+      operationId: updateProduct
+      security:
+        - bearerAuth: []
+      requestBody:
+        $ref: '#/components/requestBodies/ProductInput'
+      responses:
+        '200':
+          description: Product updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResponse'
+              example:
+                data:
+                  id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7c
+                  name: Wireless Mouse
+                  description: Ergonomic 2.4GHz wireless mouse with silent clicks
+                  price: 139000.00
+                  category: Electronics
+                  stock: 95
+                  created_at: '2026-10-22T09:00:00Z'
+                  updated_at: '2026-10-22T11:15:00Z'
+        '400':
+          $ref: '#/components/responses/ProductBodyBadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ProductNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags:
+        - Products
+      summary: Delete a product
+      description: |
+        Admin only. Soft delete: sets `deleted_at`, after which the product is
+        hidden from listing and detail. Deleting an already deleted product returns 404.
+      operationId: deleteProduct
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Product deleted. No response body.
+        '400':
+          $ref: '#/components/responses/InvalidId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ProductNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/orders:
+    post:
+      tags:
+        - Orders
+      summary: Checkout
+      description: |
+        Customer only; admins receive 403. Items with the same `product_id` are
+        merged (quantities summed) after payload validation. In a single
+        transaction the products are locked in id order, every requested product
+        must exist and not be soft-deleted (otherwise 404 `PRODUCT_NOT_FOUND`
+        listing all missing ids), and every shortage is reported together (409
+        `INSUFFICIENT_STOCK`). Prices, product names, subtotals, and the total are
+        taken from the database. Stock is deducted and the order is created with
+        status `PENDING`. Any failure rolls the whole transaction back. A total
+        above 9999999999.99 is rejected with 400 `VALIDATION_ERROR` on field `items`.
+      operationId: createOrder
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderCreate'
+            example:
+              items:
+                - product_id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7c
+                  quantity: 2
+                - product_id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7d
+                  quantity: 1
+                - product_id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7c
+                  quantity: 1
+      responses:
+        '201':
+          description: Order created. The `user` field is omitted for customers.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+              example:
+                data:
+                  id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a80
+                  user_id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7b
+                  status: PENDING
+                  total_amount: 320000.00
+                  items:
+                    - id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a81
+                      product_id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7c
+                      product_name: Ceramic Coffee Mug
+                      quantity: 3
+                      unit_price: 45000.00
+                      subtotal: 135000.00
+                    - id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a82
+                      product_id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7d
+                      product_name: Stainless Steel Water Bottle
+                      quantity: 1
+                      unit_price: 185000.00
+                      subtotal: 185000.00
+                  created_at: '2026-10-22T10:00:00.123456Z'
+                  updated_at: '2026-10-22T10:00:00.123456Z'
+        '400':
+          $ref: '#/components/responses/OrderCreateBadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ProductsNotFound'
+        '409':
+          $ref: '#/components/responses/InsufficientStock'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      tags:
+        - Orders
+      summary: List orders
+      description: |
+        Customers see only their own orders; admins see all orders, each with a
+        `user` object. Newest first (`created_at` desc, then `id` desc). Every
+        order includes its `items`.
+      operationId: listOrders
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/OrderStatusFilter'
+      responses:
+        '200':
+          description: A page of orders.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderList'
+              example:
+                data:
+                  - id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a80
+                    user_id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7b
+                    user:
+                      id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7b
+                      name: Jane Doe
+                      email: jane@example.com
+                    status: PENDING
+                    total_amount: 320000.00
+                    items:
+                      - id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a81
+                        product_id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7c
+                        product_name: Ceramic Coffee Mug
+                        quantity: 3
+                        unit_price: 45000.00
+                        subtotal: 135000.00
+                      - id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a82
+                        product_id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7d
+                        product_name: Stainless Steel Water Bottle
+                        quantity: 1
+                        unit_price: 185000.00
+                        subtotal: 185000.00
+                    created_at: '2026-10-22T10:00:00.123456Z'
+                    updated_at: '2026-10-22T10:00:00.123456Z'
+                meta:
+                  page: 1
+                  limit: 10
+                  total: 1
+                  total_pages: 1
+        '400':
+          $ref: '#/components/responses/OrderListBadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/orders/{id}:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    get:
+      tags:
+        - Orders
+      summary: Get an order
+      description: |
+        Available to the order owner and to admins. A customer requesting another
+        user's order receives 404 so the order's existence is not revealed.
+        The `user` field is included only for admins.
+      operationId: getOrder
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+              example:
+                data:
+                  id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a80
+                  user_id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7b
+                  user:
+                    id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7b
+                    name: Jane Doe
+                    email: jane@example.com
+                  status: PENDING
+                  total_amount: 320000.00
+                  items:
+                    - id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a81
+                      product_id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7c
+                      product_name: Ceramic Coffee Mug
+                      quantity: 3
+                      unit_price: 45000.00
+                      subtotal: 135000.00
+                    - id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a82
+                      product_id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7d
+                      product_name: Stainless Steel Water Bottle
+                      quantity: 1
+                      unit_price: 185000.00
+                      subtotal: 185000.00
+                  created_at: '2026-10-22T10:00:00.123456Z'
+                  updated_at: '2026-10-22T10:00:00.123456Z'
+        '400':
+          $ref: '#/components/responses/InvalidId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/orders/{id}/status:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    patch:
+      tags:
+        - Orders
+      summary: Update order status
+      description: |
+        Admin only. Only `PENDING` orders can change, to `COMPLETED` or
+        `CANCELLED`; any other transition (including repeating the current status)
+        returns 409 `INVALID_STATUS_TRANSITION`. The order row is locked with
+        `FOR UPDATE`. Cancelling restores the stock of every item in the same
+        transaction, locking the products in id order, including products that
+        were soft-deleted after the order was placed. `updated_at` is set to the
+        current time.
+      operationId: updateOrderStatus
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderStatusUpdate'
+            example:
+              status: CANCELLED
+      responses:
+        '200':
+          description: Status updated. Returns the full order including `user`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+              example:
+                data:
+                  id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a80
+                  user_id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7b
+                  user:
+                    id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7b
+                    name: Jane Doe
+                    email: jane@example.com
+                  status: CANCELLED
+                  total_amount: 320000.00
+                  items:
+                    - id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a81
+                      product_id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7c
+                      product_name: Ceramic Coffee Mug
+                      quantity: 3
+                      unit_price: 45000.00
+                      subtotal: 135000.00
+                    - id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a82
+                      product_id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7d
+                      product_name: Stainless Steel Water Bottle
+                      quantity: 1
+                      unit_price: 185000.00
+                      subtotal: 185000.00
+                  created_at: '2026-10-22T10:00:00.123456Z'
+                  updated_at: '2026-10-22T11:30:00.654321Z'
+        '400':
+          $ref: '#/components/responses/OrderStatusBadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '409':
+          $ref: '#/components/responses/InvalidStatusTransition'
+        '500':
+          $ref: '#/components/responses/InternalError'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: HS256 JWT with claims `sub` (user id), `role` (`admin` or `customer`), and `exp`.
+  headers:
+    NoStore:
+      description: Responses must not be cached.
+      schema:
+        type: string
+        example: no-store
+  parameters:
+    Page:
+      name: page
+      in: query
+      description: Page number, starting at 1.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000000
+        default: 1
+      example: 1
+    Limit:
+      name: limit
+      in: query
+      description: Items per page.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 10
+      example: 10
+    Category:
+      name: category
+      in: query
+      description: Exact category match, case-insensitive. Surrounding whitespace is trimmed.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 100
+      example: electronics
+    MinPrice:
+      name: min_price
+      in: query
+      description: Inclusive lower price bound. Must not exceed `max_price` when both are given.
+      schema:
+        type: number
+        minimum: 0
+      example: 100000
+    MaxPrice:
+      name: max_price
+      in: query
+      description: Inclusive upper price bound.
+      schema:
+        type: number
+        minimum: 0
+      example: 500000
+    InStock:
+      name: in_stock
+      in: query
+      description: '`true` returns products with stock > 0; `false` returns products with stock = 0. Omit for both.'
+      schema:
+        type: string
+        enum:
+          - 'true'
+          - 'false'
+      example: 'true'
+    ProductSort:
+      name: sort
+      in: query
+      description: Sort column. `id` is always used as a tie-breaker.
+      schema:
+        type: string
+        enum:
+          - price
+          - created_at
+        default: created_at
+    SortOrder:
+      name: order
+      in: query
+      description: Sort direction.
+      schema:
+        type: string
+        enum:
+          - asc
+          - desc
+        default: desc
+    ProductId:
+      name: id
+      in: path
+      required: true
+      description: Product id in canonical UUID form.
+      schema:
+        type: string
+        format: uuid
+      example: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7c
+    OrderStatusFilter:
+      name: status
+      in: query
+      description: Only return orders with this status (case-sensitive).
+      schema:
+        $ref: '#/components/schemas/OrderStatus'
+    OrderId:
+      name: id
+      in: path
+      required: true
+      description: Order id in canonical UUID form.
+      schema:
+        type: string
+        format: uuid
+      example: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a80
+  requestBodies:
+    ProductInput:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ProductInput'
+          example:
+            name: Wireless Mouse
+            description: Ergonomic 2.4GHz wireless mouse with silent clicks
+            price: 149000.00
+            category: Electronics
+            stock: 120
+  responses:
+    OrderCreateBadRequest:
+      description: |
+        The body is not valid JSON (`INVALID_JSON`, including wrong field types
+        such as a fractional `quantity`) or fails validation (`VALIDATION_ERROR`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            validationError:
+              summary: Item validation failed
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Request validation failed
+                  details:
+                    - field: items[0].product_id
+                      message: must be a valid UUID
+                    - field: items[1].quantity
+                      message: must be greater than or equal to 1
+            emptyItems:
+              summary: No items
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Request validation failed
+                  details:
+                    - field: items
+                      message: must contain at least 1 item
+            totalTooLarge:
+              summary: Order total exceeds NUMERIC(12,2)
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Request validation failed
+                  details:
+                    - field: items
+                      message: order total must not exceed 9999999999.99
+            invalidJson:
+              summary: Wrong field type
+              value:
+                error:
+                  code: INVALID_JSON
+                  message: Field "items.quantity" has an invalid type
+    OrderListBadRequest:
+      description: A query parameter is invalid (`VALIDATION_ERROR`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            invalidStatus:
+              summary: Status outside the enum
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Request validation failed
+                  details:
+                    - field: status
+                      message: must be one of PENDING, COMPLETED, CANCELLED
+            invalidPaging:
+              summary: Page and limit out of range
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Request validation failed
+                  details:
+                    - field: page
+                      message: must be greater than or equal to 1
+                    - field: limit
+                      message: must be less than or equal to 100
+            malformedQuery:
+              summary: Query string is not valid URL encoding
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Request validation failed
+                  details:
+                    - field: query
+                      message: must be a valid URL-encoded query string
+    OrderStatusBadRequest:
+      description: |
+        The `id` is not a UUID, the body is not valid JSON (`INVALID_JSON`), or
+        `status` is missing or not `COMPLETED`/`CANCELLED` (`VALIDATION_ERROR`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            missingStatus:
+              summary: Status missing
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Request validation failed
+                  details:
+                    - field: status
+                      message: is required
+            invalidJson:
+              summary: Wrong field type
+              value:
+                error:
+                  code: INVALID_JSON
+                  message: Field "status" has an invalid type
+            invalidStatus:
+              summary: Status outside COMPLETED and CANCELLED
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Request validation failed
+                  details:
+                    - field: status
+                      message: must be one of COMPLETED, CANCELLED
+            invalidId:
+              summary: Path id is not a UUID
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Request validation failed
+                  details:
+                    - field: id
+                      message: must be a valid UUID
+    ProductsNotFound:
+      description: One or more requested products do not exist or have been deleted.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: PRODUCT_NOT_FOUND
+              message: One or more products were not found
+              details:
+                - product_id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a99
+    InsufficientStock:
+      description: |
+        At least one product has less stock than requested. `details` lists every
+        shortage; `requested` is the merged quantity.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: INSUFFICIENT_STOCK
+              message: Insufficient stock for one or more products
+              details:
+                - product_id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7e
+                  requested: 1
+                  available: 0
+                - product_id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7c
+                  requested: 500
+                  available: 77
+    InvalidStatusTransition:
+      description: The order is not `PENDING`, so its status cannot change.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: INVALID_STATUS_TRANSITION
+              message: Order status cannot change from COMPLETED to CANCELLED
+              details:
+                - current_status: COMPLETED
+                  requested_status: CANCELLED
+    OrderNotFound:
+      description: The order does not exist or belongs to another customer.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: NOT_FOUND
+              message: Order not found
+    ProductListBadRequest:
+      description: A query parameter is invalid (`VALIDATION_ERROR`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            invalidSort:
+              summary: Sort outside the whitelist
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Request validation failed
+                  details:
+                    - field: sort
+                      message: must be one of price, created_at
+            priceRange:
+              summary: min_price greater than max_price
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Request validation failed
+                  details:
+                    - field: min_price
+                      message: must be less than or equal to max_price
+            malformedQuery:
+              summary: Query string is not valid URL encoding
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Request validation failed
+                  details:
+                    - field: query
+                      message: must be a valid URL-encoded query string
+    ProductBodyBadRequest:
+      description: |
+        The `id` is not a UUID, the body is not valid JSON (`INVALID_JSON`, also
+        used when a field has the wrong type such as a string `price` or a
+        fractional `stock`), or the body fails validation (`VALIDATION_ERROR`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            validationError:
+              summary: Field validation failed
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Request validation failed
+                  details:
+                    - field: name
+                      message: must not be empty
+                    - field: price
+                      message: must have at most 2 decimal places
+                    - field: stock
+                      message: must be greater than or equal to 0
+            missingFields:
+              summary: Required field missing
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Request validation failed
+                  details:
+                    - field: description
+                      message: is required
+            priceAsString:
+              summary: Price sent as a string
+              value:
+                error:
+                  code: INVALID_JSON
+                  message: Field "price" has an invalid type
+            invalidId:
+              summary: Path id is not a UUID
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Request validation failed
+                  details:
+                    - field: id
+                      message: must be a valid UUID
+    InvalidId:
+      description: The path `id` is not a canonical UUID.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: Request validation failed
+              details:
+                - field: id
+                  message: must be a valid UUID
+    ProductNotFound:
+      description: The product does not exist or has been deleted.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: NOT_FOUND
+              message: Product not found
+    RegisterBadRequest:
+      description: The body is not valid JSON (`INVALID_JSON`) or fails validation (`VALIDATION_ERROR`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            validationError:
+              summary: Field validation failed
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Request validation failed
+                  details:
+                    - field: email
+                      message: must be a valid email
+                    - field: password
+                      message: must be at least 8 characters
+            invalidJson:
+              summary: Malformed JSON
+              value:
+                error:
+                  code: INVALID_JSON
+                  message: Request body contains malformed JSON
+            unknownField:
+              summary: Unknown field in body
+              value:
+                error:
+                  code: INVALID_JSON
+                  message: Request body contains unknown field "role"
+    LoginBadRequest:
+      description: The body is not valid JSON (`INVALID_JSON`) or fails validation (`VALIDATION_ERROR`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            validationError:
+              summary: Field validation failed
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Request validation failed
+                  details:
+                    - field: password
+                      message: is required
+            invalidJson:
+              summary: Empty body
+              value:
+                error:
+                  code: INVALID_JSON
+                  message: Request body must not be empty
+    Unauthorized:
+      description: Missing, malformed, invalid, or expired bearer token.
+      headers:
+        WWW-Authenticate:
+          description: Authentication challenge.
+          schema:
+            type: string
+            example: Bearer realm="api"
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: UNAUTHORIZED
+              message: Invalid or expired token
+    Forbidden:
+      description: The authenticated user's role is not allowed to perform this action.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: FORBIDDEN
+              message: You do not have permission to perform this action
+    InvalidCredentials:
+      description: The email is not registered or the password is wrong.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: INVALID_CREDENTIALS
+              message: Invalid email or password
+    EmailAlreadyExists:
+      description: An account with this email already exists (case-insensitive).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: EMAIL_ALREADY_EXISTS
+              message: Email is already registered
+    InternalError:
+      description: Unexpected server error. Internal details are never exposed.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: INTERNAL_ERROR
+              message: An unexpected error occurred
+  schemas:
+    OrderStatus:
+      type: string
+      enum:
+        - PENDING
+        - COMPLETED
+        - CANCELLED
+      example: PENDING
+    OrderCreateItem:
+      type: object
+      additionalProperties: false
+      required:
+        - product_id
+        - quantity
+      properties:
+        product_id:
+          type: string
+          format: uuid
+          example: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7c
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 1000000
+          example: 2
+    OrderCreate:
+      type: object
+      additionalProperties: false
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 50
+          description: Duplicate `product_id` entries are merged by summing quantities.
+          items:
+            $ref: '#/components/schemas/OrderCreateItem'
+    OrderStatusUpdate:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - COMPLETED
+            - CANCELLED
+          example: COMPLETED
+    OrderItem:
+      type: object
+      required:
+        - id
+        - product_id
+        - product_name
+        - quantity
+        - unit_price
+        - subtotal
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a81
+        product_id:
+          type: string
+          format: uuid
+          example: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7c
+        product_name:
+          type: string
+          description: Product name captured at checkout.
+          example: Ceramic Coffee Mug
+        quantity:
+          type: integer
+          minimum: 1
+          example: 3
+        unit_price:
+          $ref: '#/components/schemas/Money'
+        subtotal:
+          $ref: '#/components/schemas/Money'
+    OrderUser:
+      type: object
+      required:
+        - id
+        - name
+        - email
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7b
+        name:
+          type: string
+          example: Jane Doe
+        email:
+          type: string
+          format: email
+          example: jane@example.com
+    Order:
+      type: object
+      required:
+        - id
+        - user_id
+        - status
+        - total_amount
+        - items
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a80
+        user_id:
+          type: string
+          format: uuid
+          example: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7b
+        user:
+          allOf:
+            - $ref: '#/components/schemas/OrderUser'
+          description: Present only when the caller is an admin.
+        status:
+          $ref: '#/components/schemas/OrderStatus'
+        total_amount:
+          $ref: '#/components/schemas/Money'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        created_at:
+          type: string
+          format: date-time
+          description: RFC 3339 in UTC with fractional seconds when non-zero.
+          example: '2026-10-22T10:00:00.123456Z'
+        updated_at:
+          type: string
+          format: date-time
+          description: RFC 3339 in UTC with fractional seconds when non-zero. Set on every status change.
+          example: '2026-10-22T10:00:00.123456Z'
+    OrderResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          $ref: '#/components/schemas/Order'
+    OrderList:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Order'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+    ProductNotFoundDetail:
+      type: object
+      required:
+        - product_id
+      properties:
+        product_id:
+          type: string
+          format: uuid
+          example: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a99
+    StockShortageDetail:
+      type: object
+      required:
+        - product_id
+        - requested
+        - available
+      properties:
+        product_id:
+          type: string
+          format: uuid
+          example: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7e
+        requested:
+          type: integer
+          minimum: 1
+          example: 3
+        available:
+          type: integer
+          minimum: 0
+          example: 1
+    StatusTransitionDetail:
+      type: object
+      required:
+        - current_status
+        - requested_status
+      properties:
+        current_status:
+          $ref: '#/components/schemas/OrderStatus'
+        requested_status:
+          $ref: '#/components/schemas/OrderStatus'
+    Money:
+      type: number
+      description: Amount in currency units, always serialized with exactly 2 decimal places.
+      minimum: 0
+      maximum: 9999999999.99
+      multipleOf: 0.01
+      example: 149000.00
+    Product:
+      type: object
+      required:
+        - id
+        - name
+        - description
+        - price
+        - category
+        - stock
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7c
+        name:
+          type: string
+          example: Wireless Mouse
+        description:
+          type: string
+          example: Ergonomic 2.4GHz wireless mouse with silent clicks
+        price:
+          $ref: '#/components/schemas/Money'
+        category:
+          type: string
+          example: Electronics
+        stock:
+          type: integer
+          minimum: 0
+          example: 120
+        created_at:
+          type: string
+          format: date-time
+          description: RFC 3339 in UTC with fractional seconds when non-zero.
+          example: '2026-10-22T09:00:00.123456Z'
+        updated_at:
+          type: string
+          format: date-time
+          description: RFC 3339 in UTC with fractional seconds when non-zero. Set on every update.
+          example: '2026-10-22T09:00:00.123456Z'
+    ProductInput:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - description
+        - price
+        - category
+        - stock
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Trimmed before validation.
+          example: Wireless Mouse
+        description:
+          type: string
+          maxLength: 2000
+          description: Required, but may be an empty string. Trimmed before validation.
+          example: Ergonomic 2.4GHz wireless mouse with silent clicks
+        price:
+          type: number
+          minimum: 0
+          maximum: 9999999999.99
+          multipleOf: 0.01
+          description: JSON number (strings are rejected) with at most 2 decimal places.
+          example: 149000.00
+        category:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Trimmed before validation.
+          example: Electronics
+        stock:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 2147483647
+          example: 120
+    ProductResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          $ref: '#/components/schemas/Product'
+    ProductList:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Product'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+    RegisterRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - email
+        - password
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Display name; surrounding whitespace is trimmed before validation.
+          example: Jane Doe
+        email:
+          type: string
+          format: email
+          maxLength: 255
+          description: Stored in lowercase; uniqueness is case-insensitive.
+          example: jane@example.com
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 72
+          description: At least 8 characters and at most 72 bytes (bcrypt limit).
+          example: supersecret
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          description: Matched case-insensitively.
+          example: jane@example.com
+        password:
+          type: string
+          format: password
+          minLength: 1
+          example: supersecret
+    Role:
+      type: string
+      enum:
+        - admin
+        - customer
+      example: customer
+    User:
+      type: object
+      required:
+        - id
+        - name
+        - email
+        - role
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7b
+        name:
+          type: string
+          example: Jane Doe
+        email:
+          type: string
+          format: email
+          example: jane@example.com
+        role:
+          $ref: '#/components/schemas/Role'
+    AuthPayload:
+      type: object
+      required:
+        - user
+        - token
+        - expires_at
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        token:
+          type: string
+          description: "HS256 JWT to send as `Authorization: Bearer <token>`."
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiY3VzdG9tZXIiLCJzdWIiOiIwMTkyYjNjNC01ZDZlLTdmODAtOWExYi0yYzNkNGU1ZjZhN2IiLCJleHAiOjE3OTI3NTY4MDAsImlhdCI6MTc5MjY3MDQwMH0.signature
+        expires_at:
+          type: string
+          format: date-time
+          description: Token expiry in RFC 3339 (UTC).
+          example: '2026-10-23T10:00:00Z'
+    AuthResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          $ref: '#/components/schemas/AuthPayload'
+    FieldError:
+      type: object
+      required:
+        - field
+        - message
+      properties:
+        field:
+          type: string
+          description: |
+            Name or path of the invalid input: a body field (`email`,
+            `items[0].quantity`), a query parameter (`limit`), the path parameter
+            `id`, or `query` when the query string itself is malformed.
+          example: email
+        message:
+          type: string
+          example: must be a valid email
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - database
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+            - degraded
+          example: ok
+        database:
+          type: string
+          enum:
+            - ok
+            - unreachable
+          example: ok
+    PaginationMeta:
+      type: object
+      required:
+        - page
+        - limit
+        - total
+        - total_pages
+      properties:
+        page:
+          type: integer
+          minimum: 1
+          example: 1
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          example: 10
+        total:
+          type: integer
+          minimum: 0
+          example: 42
+        total_pages:
+          type: integer
+          minimum: 0
+          description: ceil(total / limit); 0 when there are no results.
+          example: 5
+    ErrorCode:
+      type: string
+      enum:
+        - VALIDATION_ERROR
+        - INVALID_JSON
+        - UNAUTHORIZED
+        - INVALID_CREDENTIALS
+        - FORBIDDEN
+        - NOT_FOUND
+        - PRODUCT_NOT_FOUND
+        - EMAIL_ALREADY_EXISTS
+        - INSUFFICIENT_STOCK
+        - INVALID_STATUS_TRANSITION
+        - INTERNAL_ERROR
+      example: VALIDATION_ERROR
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              $ref: '#/components/schemas/ErrorCode'
+            message:
+              type: string
+              example: Request validation failed
+            details:
+              type: array
+              description: |
+                Optional structured details; shape depends on the error code:
+                `FieldError` for `VALIDATION_ERROR`, `ProductNotFoundDetail` for
+                `PRODUCT_NOT_FOUND`, `StockShortageDetail` for `INSUFFICIENT_STOCK`,
+                and `StatusTransitionDetail` for `INVALID_STATUS_TRANSITION`.
+              items:
+                anyOf:
+                  - $ref: '#/components/schemas/FieldError'
+                  - $ref: '#/components/schemas/ProductNotFoundDetail'
+                  - $ref: '#/components/schemas/StockShortageDetail'
+                  - $ref: '#/components/schemas/StatusTransitionDetail'
+      example:
+        error:
+          code: VALIDATION_ERROR
+          message: Request validation failed
+          details:
+            - field: email
+              message: must be a valid email
