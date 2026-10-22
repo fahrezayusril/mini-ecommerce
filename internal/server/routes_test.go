@@ -186,3 +186,79 @@ func TestRegisterRoutesProductsAccess(t *testing.T) {
 		})
 	}
 }
+
+type fakeOrderService struct {
+	calls int
+}
+
+func (f *fakeOrderService) Checkout(_ context.Context, userID uuid.UUID, _ []domain.CheckoutItem) (domain.Order, error) {
+	f.calls++
+	return domain.Order{ID: uuid.Must(uuid.NewV7()), UserID: userID, Status: domain.OrderStatusPending}, nil
+}
+
+func (f *fakeOrderService) List(context.Context, auth.Principal, domain.OrderFilter) (service.OrderPage, error) {
+	f.calls++
+	return service.OrderPage{Page: 1, Limit: 10}, nil
+}
+
+func (f *fakeOrderService) Get(_ context.Context, _ auth.Principal, id uuid.UUID) (domain.Order, error) {
+	f.calls++
+	return domain.Order{ID: id}, nil
+}
+
+func (f *fakeOrderService) UpdateStatus(_ context.Context, id uuid.UUID, status domain.OrderStatus) (domain.Order, error) {
+	f.calls++
+	return domain.Order{ID: id, Status: status}, nil
+}
+
+func TestRegisterRoutesOrdersAccess(t *testing.T) {
+	tokens := auth.NewTokenManager(strings.Repeat("o", 32), time.Hour)
+	adminToken, _, err := tokens.Issue(uuid.Must(uuid.NewV7()), domain.RoleAdmin)
+	require.NoError(t, err)
+	customerToken, _, err := tokens.Issue(uuid.Must(uuid.NewV7()), domain.RoleCustomer)
+	require.NoError(t, err)
+
+	orderPath := "/api/v1/orders/" + uuid.Must(uuid.NewV7()).String()
+	checkoutBody := `{"items":[{"product_id":"` + uuid.Must(uuid.NewV7()).String() + `","quantity":1}]}`
+	statusBody := `{"status":"COMPLETED"}`
+
+	tests := []struct {
+		name       string
+		method     string
+		path       string
+		token      string
+		body       string
+		wantStatus int
+		wantCalled bool
+	}{
+		{name: "checkout without token", method: http.MethodPost, path: "/api/v1/orders", body: checkoutBody, wantStatus: http.StatusUnauthorized},
+		{name: "list without token", method: http.MethodGet, path: "/api/v1/orders", wantStatus: http.StatusUnauthorized},
+		{name: "detail without token", method: http.MethodGet, path: orderPath, wantStatus: http.StatusUnauthorized},
+		{name: "status without token", method: http.MethodPatch, path: orderPath + "/status", body: statusBody, wantStatus: http.StatusUnauthorized},
+		{name: "checkout as customer", method: http.MethodPost, path: "/api/v1/orders", token: customerToken, body: checkoutBody, wantStatus: http.StatusCreated, wantCalled: true},
+		{name: "checkout as admin", method: http.MethodPost, path: "/api/v1/orders", token: adminToken, body: checkoutBody, wantStatus: http.StatusForbidden},
+		{name: "list as customer", method: http.MethodGet, path: "/api/v1/orders", token: customerToken, wantStatus: http.StatusOK, wantCalled: true},
+		{name: "list as admin", method: http.MethodGet, path: "/api/v1/orders", token: adminToken, wantStatus: http.StatusOK, wantCalled: true},
+		{name: "detail as customer", method: http.MethodGet, path: orderPath, token: customerToken, wantStatus: http.StatusOK, wantCalled: true},
+		{name: "status as customer", method: http.MethodPatch, path: orderPath + "/status", token: customerToken, body: statusBody, wantStatus: http.StatusForbidden},
+		{name: "status as admin", method: http.MethodPatch, path: orderPath + "/status", token: adminToken, body: statusBody, wantStatus: http.StatusOK, wantCalled: true},
+		{name: "put not allowed", method: http.MethodPut, path: orderPath, token: adminToken, wantStatus: http.StatusMethodNotAllowed},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			orders := &fakeOrderService{}
+			s := &Server{db: fakeDatabase{}, tokenParser: tokens, orderHandler: handler.NewOrderHandler(orders)}
+
+			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
+			if tt.token != "" {
+				req.Header.Set("Authorization", "Bearer "+tt.token)
+			}
+			rec := httptest.NewRecorder()
+			s.RegisterRoutes().ServeHTTP(rec, req)
+
+			assert.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+			assert.Equal(t, tt.wantCalled, orders.calls > 0)
+		})
+	}
+}

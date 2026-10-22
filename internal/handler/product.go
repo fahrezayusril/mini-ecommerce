@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log"
 	"net/http"
-	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -59,9 +58,9 @@ func NewProductHandler(service ProductService) *ProductHandler {
 }
 
 func (h *ProductHandler) List(w http.ResponseWriter, r *http.Request) {
-	values, err := url.ParseQuery(r.URL.RawQuery)
-	if err != nil {
-		validationFailed([]FieldError{{Field: "query", Message: "must be a valid URL-encoded query string"}}).write(w)
+	values, reqErr := parseQueryValues(r)
+	if reqErr != nil {
+		reqErr.write(w)
 		return
 	}
 	filter, details := parseProductFilter(values)

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"time"
@@ -22,6 +23,7 @@ type Server struct {
 	tokenParser    appmiddleware.TokenParser
 	authHandler    *handler.AuthHandler
 	productHandler *handler.ProductHandler
+	orderHandler   *handler.OrderHandler
 }
 
 func NewServer(cfg config.Config, db database.Service) (*http.Server, error) {
@@ -32,6 +34,11 @@ func NewServer(cfg config.Config, db database.Service) (*http.Server, error) {
 		return nil, fmt.Errorf("create auth service: %w", err)
 	}
 
+	orderRepository := repository.NewOrderRepository(db.Pool())
+	orderService := service.NewOrderService(orderRepository, func(ctx context.Context, fn func(service.OrderTxStore) error) error {
+		return orderRepository.InTx(ctx, func(tx *repository.OrderTx) error { return fn(tx) })
+	})
+
 	NewServer := &Server{
 		port: cfg.Port,
 
@@ -40,6 +47,7 @@ func NewServer(cfg config.Config, db database.Service) (*http.Server, error) {
 		tokenParser:    tokenManager,
 		authHandler:    handler.NewAuthHandler(authService),
 		productHandler: handler.NewProductHandler(service.NewProductService(repository.NewProductRepository(db.Pool()))),
+		orderHandler:   handler.NewOrderHandler(orderService),
 	}
 
 	// Declare Server config

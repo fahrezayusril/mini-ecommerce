@@ -6,14 +6,14 @@ import (
 	"strings"
 
 	"github.com/shopspring/decimal"
+
+	"mini-ecommerce/internal/domain"
 )
 
 const (
 	maxPriceLiteralLength = 32
 	maxPriceExponent      = 40
 )
-
-var maxPrice = decimal.RequireFromString("9999999999.99")
 
 type Money decimal.Decimal
 
@@ -53,8 +53,8 @@ func validatePrice(raw string) (decimal.Decimal, string) {
 		return decimal.Decimal{}, "must be a valid number"
 	case value.IsNegative():
 		return decimal.Decimal{}, "must be greater than or equal to 0"
-	case value.GreaterThan(maxPrice):
-		return decimal.Decimal{}, "must be less than or equal to " + maxPrice.StringFixed(2)
+	case value.GreaterThan(domain.MaxAmount):
+		return decimal.Decimal{}, "must be less than or equal to " + domain.MaxAmount.StringFixed(2)
 	case !value.Equal(value.Round(2)):
 		return decimal.Decimal{}, "must have at most 2 decimal places"
 	default:

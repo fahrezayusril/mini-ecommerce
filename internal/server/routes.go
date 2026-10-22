@@ -42,6 +42,14 @@ func (s *Server) RegisterRoutes() http.Handler {
 				r.Delete("/{id}", s.productHandler.Delete)
 			})
 		})
+
+		r.Route("/orders", func(r chi.Router) {
+			r.Use(appmiddleware.Authenticate(s.tokenParser))
+			r.With(appmiddleware.RequireRole(domain.RoleCustomer)).Post("/", s.orderHandler.Create)
+			r.Get("/", s.orderHandler.List)
+			r.Get("/{id}", s.orderHandler.Get)
+			r.With(appmiddleware.RequireRole(domain.RoleAdmin)).Patch("/{id}/status", s.orderHandler.UpdateStatus)
+		})
 	})
 
 	return r
