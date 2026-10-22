@@ -56,7 +56,10 @@ func main() {
 	}
 	defer db.Close()
 
-	server := server.NewServer(cfg, db)
+	server, err := server.NewServer(cfg, db)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// Create a done channel to signal when the shutdown is complete
 	done := make(chan bool, 1)

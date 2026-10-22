@@ -38,7 +38,7 @@ test:
 itest:
 	@echo "Running integration tests..."
 	@docker compose exec -T db sh -c 'createdb -U "$$POSTGRES_USER" mini_ecommerce_test 2>/dev/null || true'
-	@set -a && . ./.env && set +a && go test ./internal/database -v -count=1
+	@set -a && . ./.env && set +a && go test -p 1 ./internal/database ./internal/repository -v -count=1
 
 # Clean the binary
 clean:

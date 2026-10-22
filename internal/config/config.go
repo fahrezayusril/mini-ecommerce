@@ -6,8 +6,14 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	_ "github.com/joho/godotenv/autoload"
+)
+
+const (
+	minJWTSecretLength = 32
+	defaultJWTTTL      = "24h"
 )
 
 type SeedAdmin struct {
@@ -19,6 +25,8 @@ type SeedAdmin struct {
 type Config struct {
 	Port        int
 	DatabaseURL string
+	JWTSecret   string
+	JWTTTL      time.Duration
 	SeedOnStart bool
 	SeedAdmin   SeedAdmin
 }
@@ -37,6 +45,17 @@ func Load() (Config, error) {
 	if cfg.DatabaseURL == "" {
 		problems = append(problems, errors.New("DATABASE_URL is required"))
 	}
+
+	cfg.JWTSecret = strings.TrimSpace(os.Getenv("JWT_SECRET"))
+	if len(cfg.JWTSecret) < minJWTSecretLength {
+		problems = append(problems, fmt.Errorf("JWT_SECRET must be at least %d characters", minJWTSecretLength))
+	}
+
+	jwtTTL, err := time.ParseDuration(envOrDefault("JWT_TTL", defaultJWTTTL))
+	if err != nil || jwtTTL <= 0 {
+		problems = append(problems, errors.New("JWT_TTL must be a positive duration such as 24h"))
+	}
+	cfg.JWTTTL = jwtTTL
 
 	seedOnStart, err := strconv.ParseBool(envOrDefault("SEED_ON_START", "false"))
 	if err != nil {

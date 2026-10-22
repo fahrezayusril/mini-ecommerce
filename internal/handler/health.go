@@ -5,6 +5,8 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	"mini-ecommerce/internal/httpx"
 )
 
 const healthPingTimeout = 2 * time.Second
@@ -42,14 +44,14 @@ func (h *HealthHandler) Check(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.db.Ping(ctx); err != nil {
 		log.Printf("health check: database ping failed: %v", err)
-		writeJSON(w, http.StatusServiceUnavailable, HealthResponse{
+		httpx.WriteJSON(w, http.StatusServiceUnavailable, HealthResponse{
 			Status:   healthStatusDegraded,
 			Database: databaseStatusUnreachable,
 		})
 		return
 	}
 
-	writeJSON(w, http.StatusOK, HealthResponse{
+	httpx.WriteJSON(w, http.StatusOK, HealthResponse{
 		Status:   healthStatusOK,
 		Database: databaseStatusOK,
 	})

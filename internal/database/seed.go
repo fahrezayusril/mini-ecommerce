@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -88,7 +89,7 @@ func seedAdmin(ctx context.Context, tx pgx.Tx, admin config.SeedAdmin, passwordH
 
 	_, err = tx.Exec(ctx,
 		`INSERT INTO users (id, name, email, password_hash, role) VALUES ($1, $2, $3, $4, 'admin')`,
-		id, admin.Name, admin.Email, passwordHash,
+		id, admin.Name, strings.ToLower(admin.Email), passwordHash,
 	)
 	if err != nil {
 		return false, fmt.Errorf("insert admin: %w", err)
