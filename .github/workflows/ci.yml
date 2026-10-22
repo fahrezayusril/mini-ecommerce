@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [develop, staging, production]
+  push:
+    branches: [develop, staging, production]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check formatting
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::The following files are not gofmt-formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Lint OpenAPI spec
+        run: npx --yes @redocly/cli@2 lint api/openapi.yaml
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+          POSTGRES_DB: mini_ecommerce_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app -d mini_ecommerce_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PORT: "8080"
+      DATABASE_URL: postgres://app:app@localhost:5432/mini_ecommerce_test?sslmode=disable
+      TEST_DATABASE_URL: postgres://app:app@localhost:5432/mini_ecommerce_test?sslmode=disable
+      JWT_SECRET: ci-dummy-jwt-secret-not-for-production
+      JWT_TTL: 24h
+      SEED_ON_START: "false"
+      SEED_ADMIN_NAME: CI Admin
+      SEED_ADMIN_EMAIL: admin@example.com
+      SEED_ADMIN_PASSWORD: ci-admin-password
+      SEED_CUSTOMER_NAME: CI Customer
+      SEED_CUSTOMER_EMAIL: customer@example.com
+      SEED_CUSTOMER_PASSWORD: ci-customer-password
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test
+        run: go test -p 1 ./... -race -count=1
+
+  docker-build:
+    name: docker-build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          target: prod
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
