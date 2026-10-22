@@ -19,6 +19,8 @@ tags:
     description: Service and dependency health
   - name: Auth
     description: Customer registration and login
+  - name: Products
+    description: Product catalog. Reading is public; writing requires an admin token.
 paths:
   /health:
     get:
@@ -141,6 +143,187 @@ paths:
           $ref: '#/components/responses/InvalidCredentials'
         '500':
           $ref: '#/components/responses/InternalError'
+  /api/v1/products:
+    get:
+      tags:
+        - Products
+      summary: List products
+      description: |
+        Returns active (not soft-deleted) products with filtering, sorting, and
+        pagination. Results are ordered by the chosen `sort` column and then by
+        `id` in the same direction, so pages are stable. `meta.total` counts all
+        products matching the same filters. A page beyond the last one returns an
+        empty `data` array. Every query parameter that is present must have a
+        non-empty value; unknown parameters are ignored. A query string that is not
+        valid URL encoding (for example a raw `;`) is rejected with field `query`.
+      operationId: listProducts
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Category'
+        - $ref: '#/components/parameters/MinPrice'
+        - $ref: '#/components/parameters/MaxPrice'
+        - $ref: '#/components/parameters/InStock'
+        - $ref: '#/components/parameters/ProductSort'
+        - $ref: '#/components/parameters/SortOrder'
+      responses:
+        '200':
+          description: A page of products.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductList'
+              example:
+                data:
+                  - id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7c
+                    name: Wireless Mouse
+                    description: Ergonomic 2.4GHz wireless mouse with silent clicks
+                    price: 149000.00
+                    category: Electronics
+                    stock: 120
+                    created_at: '2026-10-22T09:00:00Z'
+                    updated_at: '2026-10-22T09:00:00Z'
+                meta:
+                  page: 1
+                  limit: 10
+                  total: 1
+                  total_pages: 1
+        '400':
+          $ref: '#/components/responses/ProductListBadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags:
+        - Products
+      summary: Create a product
+      description: Admin only. All fields are required. `name`, `description`, and `category` are trimmed.
+      operationId: createProduct
+      security:
+        - bearerAuth: []
+      requestBody:
+        $ref: '#/components/requestBodies/ProductInput'
+      responses:
+        '201':
+          description: Product created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResponse'
+              example:
+                data:
+                  id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7c
+                  name: Wireless Mouse
+                  description: Ergonomic 2.4GHz wireless mouse with silent clicks
+                  price: 149000.00
+                  category: Electronics
+                  stock: 120
+                  created_at: '2026-10-22T09:00:00Z'
+                  updated_at: '2026-10-22T09:00:00Z'
+        '400':
+          $ref: '#/components/responses/ProductBodyBadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/products/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ProductId'
+    get:
+      tags:
+        - Products
+      summary: Get a product
+      description: Returns an active product. Missing and soft-deleted products both return 404.
+      operationId: getProduct
+      security: []
+      responses:
+        '200':
+          description: The product.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResponse'
+              example:
+                data:
+                  id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7c
+                  name: Wireless Mouse
+                  description: Ergonomic 2.4GHz wireless mouse with silent clicks
+                  price: 149000.00
+                  category: Electronics
+                  stock: 120
+                  created_at: '2026-10-22T09:00:00Z'
+                  updated_at: '2026-10-22T09:00:00Z'
+        '400':
+          $ref: '#/components/responses/InvalidId'
+        '404':
+          $ref: '#/components/responses/ProductNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags:
+        - Products
+      summary: Replace a product
+      description: |
+        Admin only. Full replacement: every field is required. Sets `updated_at`
+        to the current time. Soft-deleted products return 404. Authentication is
+        checked before the `id` format.
+      operationId: updateProduct
+      security:
+        - bearerAuth: []
+      requestBody:
+        $ref: '#/components/requestBodies/ProductInput'
+      responses:
+        '200':
+          description: Product updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResponse'
+              example:
+                data:
+                  id: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7c
+                  name: Wireless Mouse
+                  description: Ergonomic 2.4GHz wireless mouse with silent clicks
+                  price: 139000.00
+                  category: Electronics
+                  stock: 95
+                  created_at: '2026-10-22T09:00:00Z'
+                  updated_at: '2026-10-22T11:15:00Z'
+        '400':
+          $ref: '#/components/responses/ProductBodyBadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ProductNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags:
+        - Products
+      summary: Delete a product
+      description: |
+        Admin only. Soft delete: sets `deleted_at`, after which the product is
+        hidden from listing and detail. Deleting an already deleted product returns 404.
+      operationId: deleteProduct
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Product deleted. No response body.
+        '400':
+          $ref: '#/components/responses/InvalidId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ProductNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
 components:
   securitySchemes:
     bearerAuth:
@@ -154,7 +337,209 @@ components:
       schema:
         type: string
         example: no-store
+  parameters:
+    Page:
+      name: page
+      in: query
+      description: Page number, starting at 1.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000000
+        default: 1
+      example: 1
+    Limit:
+      name: limit
+      in: query
+      description: Items per page.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 10
+      example: 10
+    Category:
+      name: category
+      in: query
+      description: Exact category match, case-insensitive. Surrounding whitespace is trimmed.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 100
+      example: electronics
+    MinPrice:
+      name: min_price
+      in: query
+      description: Inclusive lower price bound. Must not exceed `max_price` when both are given.
+      schema:
+        type: number
+        minimum: 0
+      example: 100000
+    MaxPrice:
+      name: max_price
+      in: query
+      description: Inclusive upper price bound.
+      schema:
+        type: number
+        minimum: 0
+      example: 500000
+    InStock:
+      name: in_stock
+      in: query
+      description: '`true` returns products with stock > 0; `false` returns products with stock = 0. Omit for both.'
+      schema:
+        type: string
+        enum:
+          - 'true'
+          - 'false'
+      example: 'true'
+    ProductSort:
+      name: sort
+      in: query
+      description: Sort column. `id` is always used as a tie-breaker.
+      schema:
+        type: string
+        enum:
+          - price
+          - created_at
+        default: created_at
+    SortOrder:
+      name: order
+      in: query
+      description: Sort direction.
+      schema:
+        type: string
+        enum:
+          - asc
+          - desc
+        default: desc
+    ProductId:
+      name: id
+      in: path
+      required: true
+      description: Product id in canonical UUID form.
+      schema:
+        type: string
+        format: uuid
+      example: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7c
+  requestBodies:
+    ProductInput:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ProductInput'
+          example:
+            name: Wireless Mouse
+            description: Ergonomic 2.4GHz wireless mouse with silent clicks
+            price: 149000.00
+            category: Electronics
+            stock: 120
   responses:
+    ProductListBadRequest:
+      description: A query parameter is invalid (`VALIDATION_ERROR`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            invalidSort:
+              summary: Sort outside the whitelist
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Request validation failed
+                  details:
+                    - field: sort
+                      message: must be one of price, created_at
+            priceRange:
+              summary: min_price greater than max_price
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Request validation failed
+                  details:
+                    - field: min_price
+                      message: must be less than or equal to max_price
+            malformedQuery:
+              summary: Query string is not valid URL encoding
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Request validation failed
+                  details:
+                    - field: query
+                      message: must be a valid URL-encoded query string
+    ProductBodyBadRequest:
+      description: |
+        The `id` is not a UUID, the body is not valid JSON (`INVALID_JSON`, also
+        used when a field has the wrong type such as a string `price` or a
+        fractional `stock`), or the body fails validation (`VALIDATION_ERROR`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            validationError:
+              summary: Field validation failed
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Request validation failed
+                  details:
+                    - field: name
+                      message: must not be empty
+                    - field: price
+                      message: must have at most 2 decimal places
+                    - field: stock
+                      message: must be greater than or equal to 0
+            missingFields:
+              summary: Required field missing
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Request validation failed
+                  details:
+                    - field: description
+                      message: is required
+            priceAsString:
+              summary: Price sent as a string
+              value:
+                error:
+                  code: INVALID_JSON
+                  message: Field "price" has an invalid type
+            invalidId:
+              summary: Path id is not a UUID
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Request validation failed
+                  details:
+                    - field: id
+                      message: must be a valid UUID
+    InvalidId:
+      description: The path `id` is not a canonical UUID.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: Request validation failed
+              details:
+                - field: id
+                  message: must be a valid UUID
+    ProductNotFound:
+      description: The product does not exist or has been deleted.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: NOT_FOUND
+              message: Product not found
     RegisterBadRequest:
       description: The body is not valid JSON (`INVALID_JSON`) or fails validation (`VALIDATION_ERROR`).
       content:
@@ -264,6 +649,113 @@ components:
               code: INTERNAL_ERROR
               message: An unexpected error occurred
   schemas:
+    Money:
+      type: number
+      description: Amount in currency units, always serialized with exactly 2 decimal places.
+      minimum: 0
+      maximum: 9999999999.99
+      multipleOf: 0.01
+      example: 149000.00
+    Product:
+      type: object
+      required:
+        - id
+        - name
+        - description
+        - price
+        - category
+        - stock
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 0192b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7c
+        name:
+          type: string
+          example: Wireless Mouse
+        description:
+          type: string
+          example: Ergonomic 2.4GHz wireless mouse with silent clicks
+        price:
+          $ref: '#/components/schemas/Money'
+        category:
+          type: string
+          example: Electronics
+        stock:
+          type: integer
+          minimum: 0
+          example: 120
+        created_at:
+          type: string
+          format: date-time
+          description: RFC 3339 in UTC with fractional seconds when non-zero.
+          example: '2026-10-22T09:00:00.123456Z'
+        updated_at:
+          type: string
+          format: date-time
+          description: RFC 3339 in UTC with fractional seconds when non-zero. Set on every update.
+          example: '2026-10-22T09:00:00.123456Z'
+    ProductInput:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - description
+        - price
+        - category
+        - stock
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Trimmed before validation.
+          example: Wireless Mouse
+        description:
+          type: string
+          maxLength: 2000
+          description: Required, but may be an empty string. Trimmed before validation.
+          example: Ergonomic 2.4GHz wireless mouse with silent clicks
+        price:
+          type: number
+          minimum: 0
+          maximum: 9999999999.99
+          multipleOf: 0.01
+          description: JSON number (strings are rejected) with at most 2 decimal places.
+          example: 149000.00
+        category:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Trimmed before validation.
+          example: Electronics
+        stock:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 2147483647
+          example: 120
+    ProductResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          $ref: '#/components/schemas/Product'
+    ProductList:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Product'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
     RegisterRequest:
       type: object
       additionalProperties: false
@@ -415,6 +907,7 @@ components:
         total_pages:
           type: integer
           minimum: 0
+          description: ceil(total / limit); 0 when there are no results.
           example: 5
     ErrorCode:
       type: string
